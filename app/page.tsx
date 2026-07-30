@@ -26,7 +26,11 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  demoTravelPackages,
+  type TravelPackage,
+} from "../lib/travel-packages";
 
 const products = [
   { id: "flights", label: "Vuelos", icon: Plane },
@@ -52,61 +56,50 @@ const trustItems = [
   },
 ];
 
-const deals = [
-  {
-    id: "cusco",
-    destination: "Cusco esencial",
-    country: "Perú",
-    image: "/images/rumbo-hero.jpg",
-    imagePosition: "70% 58%",
-    duration: "4 días / 3 noches",
-    rating: "4.9",
-    reviews: "328",
-    price: "S/ 1,249",
-    previousPrice: "S/ 1,490",
-    tag: "Más elegido",
-    included: ["Vuelo ida y vuelta", "Hotel con desayuno", "Traslados incluidos"],
-  },
-  {
-    id: "punta-cana",
-    destination: "Punta Cana total",
-    country: "República Dominicana",
-    image: "/images/rumbo-beach.jpg",
-    imagePosition: "center",
-    duration: "6 días / 5 noches",
-    rating: "4.8",
-    reviews: "214",
-    price: "US$ 749",
-    previousPrice: "US$ 920",
-    tag: "Todo incluido",
-    included: ["Vuelo ida y vuelta", "Resort all inclusive", "Traslado al aeropuerto"],
-  },
-  {
-    id: "cartagena",
-    destination: "Cartagena con encanto",
-    country: "Colombia",
-    image: "/images/rumbo-city.jpg",
-    imagePosition: "center",
-    duration: "5 días / 4 noches",
-    rating: "4.7",
-    reviews: "189",
-    price: "US$ 579",
-    previousPrice: "US$ 699",
-    tag: "Precio especial",
-    included: ["Vuelo ida y vuelta", "Hotel boutique", "City tour histórico"],
-  },
-] as const;
-
-type Deal = (typeof deals)[number];
-
 export default function Home() {
   const [activeProduct, setActiveProduct] =
     useState<(typeof products)[number]["id"]>("flights");
   const [origin, setOrigin] = useState("Lima");
   const [destination, setDestination] = useState("Cusco");
   const [hasSearched, setHasSearched] = useState(false);
-  const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [bookingStep, setBookingStep] = useState(false);
+  const [deals, setDeals] = useState<TravelPackage[]>(demoTravelPackages);
+  const [catalogMode, setCatalogMode] = useState<"demo" | "live">("demo");
+  const [catalogMessage, setCatalogMessage] = useState(
+    "Catálogo demostrativo: las tarifas deben confirmarse antes de cobrar.",
+  );
+  const [selectedDeal, setSelectedDeal] = useState<TravelPackage | null>(null);
+  const [bookingStep, setBookingStep] = useState<0 | 1 | 2 | 3>(0);
+  const [travellerName, setTravellerName] = useState("");
+  const [travellerEmail, setTravellerEmail] = useState("");
+  const [referralCode, setReferralCode] = useState("");
+
+  useEffect(() => {
+    let isActive = true;
+
+    fetch("/api/catalog")
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudo consultar el catálogo");
+        return response.json() as Promise<{
+          mode: "demo" | "live";
+          packages: TravelPackage[];
+          message: string;
+        }>;
+      })
+      .then((catalog) => {
+        if (!isActive) return;
+        setDeals(catalog.packages);
+        setCatalogMode(catalog.mode);
+        setCatalogMessage(catalog.message);
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setCatalogMode("demo");
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   const swapLocations = () => {
     setOrigin(destination);
@@ -122,7 +115,10 @@ export default function Home() {
 
   const closeModal = () => {
     setSelectedDeal(null);
-    setBookingStep(false);
+    setBookingStep(0);
+    setTravellerName("");
+    setTravellerEmail("");
+    setReferralCode("");
   };
 
   return (
@@ -140,7 +136,7 @@ export default function Home() {
             <a href="#paquetes">Paquetes</a>
             <a href="#ofertas">Ofertas</a>
             <a href="#inspiracion">Inspiración</a>
-            <a href="#ayuda">Ayuda</a>
+            <a href="/panel">Portal de asociados</a>
           </nav>
 
           <div className="header-actions">
@@ -150,11 +146,11 @@ export default function Home() {
               <ChevronDown aria-hidden="true" />
             </button>
             <span className="header-divider" aria-hidden="true" />
-            <button className="header-action account" type="button">
+            <a className="header-action account" href="/panel">
               <CircleUserRound aria-hidden="true" />
               <span>Mi cuenta</span>
               <ChevronDown aria-hidden="true" />
-            </button>
+            </a>
             <button className="mobile-menu" type="button" aria-label="Abrir menú">
               <Menu aria-hidden="true" />
             </button>
@@ -311,6 +307,17 @@ export default function Home() {
           </button>
         </div>
 
+        <div
+          className={`catalog-status ${catalogMode === "live" ? "is-live" : ""}`}
+          role="status"
+        >
+          <span aria-hidden="true" />
+          <strong>
+            {catalogMode === "live" ? "Catálogo conectado" : "Modo demostración"}
+          </strong>
+          <p>{catalogMessage}</p>
+        </div>
+
         <div className="deal-grid">
           {deals.map((deal) => (
             <article className="deal-card" key={deal.id}>
@@ -354,7 +361,7 @@ export default function Home() {
                 <div className="deal-footer">
                   <div>
                     <span>Desde</span>
-                    <s>{deal.previousPrice}</s>
+                    {deal.previousPrice ? <s>{deal.previousPrice}</s> : null}
                     <strong>{deal.price}</strong>
                     <small>por persona</small>
                   </div>
@@ -394,11 +401,12 @@ export default function Home() {
         </a>
         <p>Viajes simples, experiencias enormes.</p>
         <nav aria-label="Enlaces del pie de página">
+          <a href="/panel">Portal de asociados</a>
           <a href="#ayuda">Ayuda</a>
           <a href="#condiciones">Condiciones</a>
           <a href="#privacidad">Privacidad</a>
         </nav>
-        <small>© 2026 Rumbo. Prototipo de experiencia digital.</small>
+        <small>© 2026 Rumbo. MVP 1 en desarrollo.</small>
       </footer>
 
       {selectedDeal && (
@@ -418,7 +426,7 @@ export default function Home() {
               <X aria-hidden="true" />
             </button>
 
-            {!bookingStep ? (
+            {bookingStep === 0 ? (
               <>
                 <div
                   className="modal-image"
@@ -460,14 +468,14 @@ export default function Home() {
                       <strong>{selectedDeal.price}</strong>
                       <small>por persona · tasas incluidas</small>
                     </div>
-                    <button onClick={() => setBookingStep(true)} type="button">
+                    <button onClick={() => setBookingStep(1)} type="button">
                       Continuar reserva
                       <ArrowRight aria-hidden="true" />
                     </button>
                   </div>
                 </div>
               </>
-            ) : (
+            ) : bookingStep === 1 ? (
               <div className="booking-step">
                 <span className="booking-icon">
                   <ShieldCheck aria-hidden="true" />
@@ -486,19 +494,115 @@ export default function Home() {
                   <span>Total referencial</span>
                   <strong>{selectedDeal.price}</strong>
                 </div>
-                <button className="booking-primary" type="button">
+                <button
+                  className="booking-primary"
+                  onClick={() => setBookingStep(2)}
+                  type="button"
+                >
                   Ingresar datos de pasajeros
                   <ArrowRight aria-hidden="true" />
                 </button>
                 <button
                   className="booking-back"
-                  onClick={() => setBookingStep(false)}
+                  onClick={() => setBookingStep(0)}
                   type="button"
                 >
                   Volver al detalle
                 </button>
                 <small>
-                  Este prototipo no realiza cobros ni genera una reserva real.
+                  La disponibilidad y el pago serán confirmados por un asesor.
+                </small>
+              </div>
+            ) : bookingStep === 2 ? (
+              <form
+                className="booking-step traveller-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setBookingStep(3);
+                }}
+              >
+                <p className="section-kicker">Solicitud de reserva</p>
+                <h2>Datos del viajero principal</h2>
+                <p>
+                  Completa la información para que Rumbo valide disponibilidad,
+                  tarifa y condiciones antes del pago.
+                </p>
+
+                <div className="traveller-fields">
+                  <label>
+                    <span>Nombre completo</span>
+                    <input
+                      autoComplete="name"
+                      onChange={(event) => setTravellerName(event.target.value)}
+                      placeholder="Nombre y apellidos"
+                      required
+                      value={travellerName}
+                    />
+                  </label>
+                  <label>
+                    <span>Correo</span>
+                    <input
+                      autoComplete="email"
+                      onChange={(event) => setTravellerEmail(event.target.value)}
+                      placeholder="nombre@correo.com"
+                      required
+                      type="email"
+                      value={travellerEmail}
+                    />
+                  </label>
+                  <label>
+                    <span>Código de asociado (opcional)</span>
+                    <input
+                      autoCapitalize="characters"
+                      onChange={(event) =>
+                        setReferralCode(event.target.value.toUpperCase())
+                      }
+                      placeholder="RUMBO-RBF"
+                      value={referralCode}
+                    />
+                  </label>
+                </div>
+
+                <button className="booking-primary" type="submit">
+                  Enviar solicitud
+                  <ArrowRight aria-hidden="true" />
+                </button>
+                <button
+                  className="booking-back"
+                  onClick={() => setBookingStep(1)}
+                  type="button"
+                >
+                  Volver al resumen
+                </button>
+                <small>
+                  Este flujo todavía no cobra ni emite tickets automáticamente.
+                </small>
+              </form>
+            ) : (
+              <div className="booking-step booking-confirmation">
+                <span className="booking-icon">
+                  <Check aria-hidden="true" />
+                </span>
+                <p className="section-kicker">Solicitud preparada</p>
+                <h2>Listo para validación</h2>
+                <p>
+                  La solicitud de <strong>{travellerName}</strong> para{" "}
+                  <strong>{selectedDeal.destination}</strong> quedó preparada en
+                  este entorno demostrativo.
+                </p>
+                <div className="booking-reference">
+                  <span>Referencia</span>
+                  <strong>RUM-2026-0048</strong>
+                  <span>Asociado</span>
+                  <strong>{referralCode || "Venta directa"}</strong>
+                </div>
+                <button className="booking-primary" onClick={closeModal} type="button">
+                  Finalizar
+                  <Check aria-hidden="true" />
+                </button>
+                <small>
+                  Al conectar Spree, esta solicitud generará el pedido y la
+                  atribución de comisión automáticamente.
                 </small>
               </div>
             )}

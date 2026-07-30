@@ -137,6 +137,7 @@ button {
   gap: 8px;
   padding: 8px 0;
   font-size: 14px;
+  text-decoration: none;
 }
 
 .header-action svg:first-child {
@@ -510,6 +511,52 @@ label.search-field {
 
 .text-link svg {
   width: 18px;
+}
+
+.catalog-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 28px;
+  padding: 12px 15px;
+  border: 1px solid #fed7aa;
+  border-radius: 13px;
+  background: #fff9ed;
+  color: #9a3412;
+  font-size: 11px;
+}
+
+.catalog-status > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.catalog-status strong {
+  flex: 0 0 auto;
+}
+
+.catalog-status p {
+  margin: 0;
+  color: #a15c00;
+}
+
+.catalog-status.is-live {
+  border-color: #a6dec9;
+  background: #eefbf6;
+  color: #1f7a59;
+}
+
+.catalog-status.is-live > span {
+  background: #2f9d77;
+  box-shadow: 0 0 0 4px rgba(47, 157, 119, 0.12);
+}
+
+.catalog-status.is-live p {
+  color: #3b8067;
 }
 
 .deal-grid {
@@ -988,6 +1035,68 @@ label.search-field {
   color: var(--slate);
 }
 
+.traveller-form {
+  text-align: left;
+}
+
+.traveller-form > .section-kicker,
+.traveller-form > h2,
+.traveller-form > p,
+.booking-confirmation {
+  text-align: center;
+}
+
+.traveller-fields {
+  display: grid;
+  gap: 14px;
+  margin: 26px 0;
+}
+
+.traveller-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.traveller-fields input {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--white);
+  color: var(--ink);
+  outline: 0;
+}
+
+.traveller-fields input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.12);
+}
+
+.booking-reference {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 11px 20px;
+  margin: 26px 0;
+  padding: 20px;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.booking-reference span {
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.booking-reference strong {
+  color: var(--navy);
+  text-align: right;
+  font-size: 12px;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
@@ -1170,6 +1279,16 @@ input:focus-visible {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .catalog-status {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .catalog-status p {
+    flex-basis: 100%;
+    padding-left: 17px;
   }
 
   .deal-grid {
