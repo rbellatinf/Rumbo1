@@ -25,6 +25,8 @@ del usuario cuando se ejecuta en un VPS o entorno cloud.
 | Componente | Responsabilidad |
 | --- | --- |
 | Storefront Rumbo | Búsqueda, catálogo, detalle y solicitud de reserva |
+| Adaptador Amadeus | Autocompletado normalizado de ciudades y aeropuertos |
+| Adaptador PriceTravel | Consulta y normalización de paquetes B2B |
 | Spree Store API | Productos, clientes, carritos, pedidos y estado de pagos |
 | Spree Admin | Paquetes, tarifas, pedidos y clientes |
 | Módulo Rumbo | Asociados, licencias, atribución y comisión directa |
@@ -56,9 +58,11 @@ campos personalizados:
 - fechas de salida y retorno
 - condiciones, cupos y política de cancelación
 
-El endpoint `/api/catalog` ya puede leer productos de la Store API v3. Si las
-variables de conexión todavía no existen, devuelve datos demostrativos
-identificados como tales y no habilita cobros.
+El endpoint `/api/catalog` puede leer productos de la Store API v3.
+`/api/airports` encapsula OAuth y Airport & City Search de Amadeus.
+`/api/packages` encapsula la búsqueda B2B de PriceTravel. Si las variables de
+conexión todavía no existen, los tres endpoints devuelven datos demostrativos
+identificados como tales y no habilitan cobros.
 
 ## Límites del MVP 1
 
@@ -67,13 +71,14 @@ Quedan fuera de esta fase:
 - comisiones multinivel o pagos a patrocinadores;
 - retornos financieros, billeteras o retiros automáticos;
 - emisión automática de tickets;
-- integraciones con GDS, aerolíneas u hoteles;
+- emisión, revalidación o cancelación automática con proveedores;
 - facturación electrónica;
 - aplicación móvil nativa;
 - pasarela de pago automática no contratada.
 
-Las reservas y excepciones se validan manualmente hasta integrar el primer
-proveedor de viajes de extremo a extremo.
+La búsqueda de aeropuertos y la capa de paquetes ya quedan preparadas, pero las
+reservas y excepciones se validan manualmente hasta certificar PriceTravel de
+extremo a extremo con credenciales comerciales.
 
 ## Preparación del entorno
 
@@ -82,6 +87,7 @@ proveedor de viajes de extremo a extremo.
 3. Ejecutar `docker compose up -d` en el servidor.
 4. Crear una clave publicable en Spree Admin.
 5. Configurar `SPREE_API_URL` y `SPREE_PUBLISHABLE_API_KEY` en el storefront.
+6. Configurar las credenciales de Amadeus y PriceTravel únicamente en el
+   entorno del servidor.
 
 Nunca se deben subir secretos reales al repositorio.
-

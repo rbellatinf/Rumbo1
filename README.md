@@ -10,12 +10,18 @@ licencias, enlaces de referido y comisión directa.
 - portal demostrativo del asociado;
 - backoffice demostrativo;
 - adaptador para el catálogo de Spree Store API v3;
+- autocompletado de aeropuertos preparado para Amadeus Airport & City Search;
+- buscador de paquetes preparado para el contrato B2B de PriceTravel;
 - PostgreSQL con el modelo propio de asociados, licencias, atribuciones,
   comisiones y auditoría;
 - entorno reproducible con Spree Commerce 5.4 y PostgreSQL 18.
 
 Mientras el backend no esté configurado, las tarifas aparecen claramente como
 demostrativas y no se generan cobros ni tickets.
+
+Los conectores externos nunca envían secretos al navegador. Sin las
+credenciales de sandbox, Amadeus usa una lista demostrativa limitada y
+PriceTravel devuelve los paquetes demostrativos de Rumbo.
 
 ## Desarrollo del storefront
 
@@ -48,3 +54,6 @@ crear una clave publicable, configurar `SPREE_API_URL` y
 
 La definición completa del alcance y la arquitectura está en
 [`docs/MVP1_ARCHITECTURE.md`](docs/MVP1_ARCHITECTURE.md).
+
+Los pasos y variables de las integraciones están en
+[`docs/TRAVEL_API_INTEGRATIONS.md`](docs/TRAVEL_API_INTEGRATIONS.md).

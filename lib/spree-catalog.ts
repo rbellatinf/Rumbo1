@@ -98,6 +98,7 @@ function mapProduct(
         "Asesoría de viaje",
       ],
     variantId: product.default_variant_id,
+    provider: "Spree",
   };
 }
 
@@ -154,4 +155,3 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
     };
   }
 }
-

@@ -12,6 +12,8 @@ export type TravelPackage = {
   tag: string;
   included: string[];
   variantId?: string;
+  provider?: "Rumbo" | "Spree" | "PriceTravel";
+  providerReference?: string;
 };
 
 export const demoTravelPackages: TravelPackage[] = [
@@ -27,6 +29,7 @@ export const demoTravelPackages: TravelPackage[] = [
     price: "S/ 1,249",
     previousPrice: "S/ 1,490",
     tag: "Más elegido",
+    provider: "Rumbo",
     included: [
       "Vuelo ida y vuelta",
       "Hotel con desayuno",
@@ -45,6 +48,7 @@ export const demoTravelPackages: TravelPackage[] = [
     price: "US$ 749",
     previousPrice: "US$ 920",
     tag: "Todo incluido",
+    provider: "Rumbo",
     included: [
       "Vuelo ida y vuelta",
       "Resort all inclusive",
@@ -63,7 +67,7 @@ export const demoTravelPackages: TravelPackage[] = [
     price: "US$ 579",
     previousPrice: "US$ 699",
     tag: "Precio especial",
+    provider: "Rumbo",
     included: ["Vuelo ida y vuelta", "Hotel boutique", "City tour histórico"],
   },
 ];
-
