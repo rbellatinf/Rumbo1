@@ -27,11 +27,11 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AirportOption,
   AirportSearchResult,
-} from "../lib/amadeus-airports";
+} from "../lib/airlabs-airports";
 import {
   demoTravelPackages,
   type TravelPackage,
@@ -79,6 +79,8 @@ function AirportField({
   const [options, setOptions] = useState<AirportOption[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasResolved, setHasResolved] = useState(false);
+  const requestId = useRef(0);
   const listId = `${id}-airport-options`;
 
   useEffect(() => {
@@ -90,6 +92,7 @@ function AirportField({
     }
 
     const controller = new AbortController();
+    const currentRequest = ++requestId.current;
     const timeout = window.setTimeout(() => {
       setIsLoading(true);
       fetch(`/api/airports?q=${encodeURIComponent(keyword)}`, {
@@ -100,14 +103,20 @@ function AirportField({
           return response.json() as Promise<AirportSearchResult>;
         })
         .then((result) => {
+          if (requestId.current !== currentRequest) return;
           setOptions(result.airports);
+          setHasResolved(true);
           onModeChange(result.mode);
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
+          if (requestId.current !== currentRequest) return;
           setOptions([]);
+          setHasResolved(true);
         })
-        .finally(() => setIsLoading(false));
+        .finally(() => {
+          if (requestId.current === currentRequest) setIsLoading(false);
+        });
     }, 260);
 
     return () => {
@@ -136,8 +145,11 @@ function AirportField({
             id={id}
             onBlur={() => window.setTimeout(() => setIsOpen(false), 140)}
             onChange={(event) => {
+              requestId.current += 1;
               onChange(event.target.value, "");
-              if (event.target.value.trim().length < 2) setOptions([]);
+              setOptions([]);
+              setHasResolved(false);
+              setIsLoading(false);
               setIsOpen(true);
             }}
             onFocus={() => setIsOpen(true)}
@@ -160,7 +172,7 @@ function AirportField({
         </div>
       </label>
 
-      {isOpen && (options.length > 0 || isLoading) ? (
+      {isOpen && (options.length > 0 || isLoading || hasResolved) ? (
         <div className="airport-dropdown" id={listId} role="listbox">
           {options.map((airport) => (
             <button
@@ -183,6 +195,9 @@ function AirportField({
           ))}
           {isLoading && options.length === 0 ? (
             <p>Consultando aeropuertos…</p>
+          ) : null}
+          {!isLoading && hasResolved && options.length === 0 ? (
+            <p>No encontramos aeropuertos para esa búsqueda.</p>
           ) : null}
         </div>
       ) : null}
@@ -474,8 +489,8 @@ export default function Home() {
             <div className="integration-strip" aria-label="Fuentes del buscador">
               <span className={airportMode === "live" ? "is-live" : ""}>
                 <Plane aria-hidden="true" />
-                <strong>Amadeus</strong>
-                {airportMode === "live" ? "aeropuertos conectados" : "modo prueba"}
+                <strong>AirLabs</strong>
+                {airportMode === "live" ? "aeropuertos conectados" : "respaldo local"}
               </span>
               <span className={packageMode === "live" ? "is-live" : ""}>
                 <Package aria-hidden="true" />

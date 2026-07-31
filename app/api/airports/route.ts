@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchAirports } from "../../../lib/amadeus-airports";
+import { searchAirports } from "../../../lib/airlabs-airports";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         mode: "demo",
-        provider: "Amadeus",
+        provider: "AirLabs",
         airports: [],
         message: "Escribe al menos dos letras para buscar un aeropuerto.",
       },
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   const result = await searchAirports(keyword);
   return NextResponse.json(result, {
     headers: {
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=900",
+      "Cache-Control": "no-store",
     },
   });
 }

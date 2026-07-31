@@ -10,7 +10,7 @@ licencias, enlaces de referido y comisión directa.
 - portal demostrativo del asociado;
 - backoffice demostrativo;
 - adaptador para el catálogo de Spree Store API v3;
-- autocompletado de aeropuertos preparado para Amadeus Airport & City Search;
+- autocompletado mundial de aeropuertos preparado para AirLabs Name Suggestion;
 - buscador de paquetes preparado para el contrato B2B de PriceTravel;
 - PostgreSQL con el modelo propio de asociados, licencias, atribuciones,
   comisiones y auditoría;
@@ -20,7 +20,7 @@ Mientras el backend no esté configurado, las tarifas aparecen claramente como
 demostrativas y no se generan cobros ni tickets.
 
 Los conectores externos nunca envían secretos al navegador. Sin las
-credenciales de sandbox, Amadeus usa una lista demostrativa limitada y
+credenciales de sandbox, AirLabs usa una lista local de respaldo y
 PriceTravel devuelve los paquetes demostrativos de Rumbo.
 
 ## Desarrollo del storefront

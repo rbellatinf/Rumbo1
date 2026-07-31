@@ -25,7 +25,7 @@ del usuario cuando se ejecuta en un VPS o entorno cloud.
 | Componente | Responsabilidad |
 | --- | --- |
 | Storefront Rumbo | Búsqueda, catálogo, detalle y solicitud de reserva |
-| Adaptador Amadeus | Autocompletado normalizado de ciudades y aeropuertos |
+| Adaptador AirLabs | Autocompletado normalizado de ciudades y aeropuertos |
 | Adaptador PriceTravel | Consulta y normalización de paquetes B2B |
 | Spree Store API | Productos, clientes, carritos, pedidos y estado de pagos |
 | Spree Admin | Paquetes, tarifas, pedidos y clientes |
@@ -59,7 +59,7 @@ campos personalizados:
 - condiciones, cupos y política de cancelación
 
 El endpoint `/api/catalog` puede leer productos de la Store API v3.
-`/api/airports` encapsula OAuth y Airport & City Search de Amadeus.
+`/api/airports` encapsula el servicio Name Suggestion de AirLabs.
 `/api/packages` encapsula la búsqueda B2B de PriceTravel. Si las variables de
 conexión todavía no existen, los tres endpoints devuelven datos demostrativos
 identificados como tales y no habilitan cobros.
@@ -87,7 +87,7 @@ extremo a extremo con credenciales comerciales.
 3. Ejecutar `docker compose up -d` en el servidor.
 4. Crear una clave publicable en Spree Admin.
 5. Configurar `SPREE_API_URL` y `SPREE_PUBLISHABLE_API_KEY` en el storefront.
-6. Configurar las credenciales de Amadeus y PriceTravel únicamente en el
+6. Configurar las credenciales de AirLabs y PriceTravel únicamente en el
    entorno del servidor.
 
 Nunca se deben subir secretos reales al repositorio.

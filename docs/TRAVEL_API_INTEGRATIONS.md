@@ -1,4 +1,4 @@
-# Integraciones de viaje: Amadeus y PriceTravel
+# Integraciones de viaje: AirLabs y PriceTravel
 
 ## Diseño
 
@@ -6,7 +6,7 @@ El navegador nunca se conecta directamente con los proveedores ni recibe sus
 credenciales.
 
 1. El usuario escribe una ciudad o código IATA.
-2. `/api/airports` consulta Amadeus y normaliza la respuesta.
+2. `/api/airports` consulta AirLabs y normaliza la respuesta.
 3. El usuario selecciona origen, destino y fechas.
 4. `/api/packages` consulta PriceTravel y transforma su respuesta al formato
    interno `TravelPackage`.
@@ -15,24 +15,24 @@ credenciales.
 La separación por adaptadores permite cambiar el contrato de un proveedor sin
 reescribir la experiencia de compra.
 
-## Amadeus
+## AirLabs
 
-El conector usa OAuth 2.0 con `client_credentials` y el recurso Airport & City
-Search. Las claves se guardan solo en el entorno del servidor.
+El conector usa la API REST Name Suggestion para autocompletar ciudades,
+países y aeropuertos. La clave se guarda solo en el entorno del servidor y
+nunca llega al navegador.
 
 Variables:
 
-- `AMADEUS_API_BASE_URL`
-- `AMADEUS_API_KEY`
-- `AMADEUS_API_SECRET`
+- `AIRLABS_API_BASE_URL`
+- `AIRLABS_API_KEY`
 
-Para pruebas, la URL base es `https://test.api.amadeus.com`. Producción debe
-activarse con las condiciones comerciales de Amadeus.
+La URL base es `https://airlabs.co/api/v9`. Sin clave o si el proveedor no
+responde, Rumbo utiliza un catálogo local de respaldo identificado como tal.
 
 Documentación oficial:
 
-- https://developers.amadeus.com/
-- https://github.com/amadeus4dev/amadeus-node
+- https://airlabs.co/docs/suggest
+- https://airlabs.co/docs/airports
 
 ## PriceTravel
 
@@ -63,7 +63,7 @@ Contacto de integración publicado por PriceTravel Connect:
 
 ## Activación segura
 
-1. Crear un proyecto Self-Service de Amadeus y obtener claves de prueba.
+1. Crear una cuenta de AirLabs y obtener una clave de prueba.
 2. Solicitar a PriceTravel acceso B2B, documentación vigente, sandbox,
    credenciales y casos de certificación.
 3. Guardar los valores en el administrador de secretos del hosting; nunca en
@@ -71,5 +71,5 @@ Contacto de integración publicado por PriceTravel Connect:
 4. Probar búsquedas sin datos reales de pasajeros.
 5. Validar límites, moneda, impuestos, comisiones, disponibilidad, reintentos y
    política de caché.
-6. Habilitar producción solo después de la aprobación comercial y técnica de
-   ambos proveedores.
+6. Habilitar producción solo después de validar las condiciones comerciales de
+   AirLabs y completar la aprobación técnica de PriceTravel.
