@@ -1,0 +1,42 @@
+# Render Blueprint for the Rumbo MVP.
+# This creates one Spree web service and one managed PostgreSQL database.
+services:
+  - type: web
+    name: rumbo1-spree
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./backend/spree/Dockerfile
+    dockerContext: .
+    healthCheckPath: /up
+    # Free services cannot use Render's pre-deploy command. Run the
+    # idempotent database setup before starting Rails instead.
+    dockerCommand: >-
+      /bin/bash -c "./bin/rails db:prepare &&
+      ./bin/rails runner /opt/rumbo/apply_rumbo_schema.rb &&
+      exec ./bin/rails server -b 0.0.0.0"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rumbo1-postgres
+          property: connectionString
+      - key: SECRET_KEY_BASE
+        generateValue: true
+      - key: RAILS_LOG_LEVEL
+        value: info
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: SOLID_QUEUE_IN_PUMA
+        value: "true"
+      - key: MISSION_CONTROL_USER
+        value: jobs
+      - key: MISSION_CONTROL_PASSWORD
+        generateValue: true
+
+databases:
+  - name: rumbo1-postgres
+    plan: free
+    region: oregon
+    databaseName: rumbo_production
+    postgresMajorVersion: "18"
+    ipAllowList: []
