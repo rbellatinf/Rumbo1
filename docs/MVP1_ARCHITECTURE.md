@@ -50,13 +50,17 @@ No se distribuyen comisiones a patrocinadores ni niveles superiores.
 Cada paquete se modela como un producto. Los campos de viaje se guardan como
 campos personalizados:
 
-- `country`
-- `duration`
-- `included`, separado por `|`
-- `rating`
-- `reviews`
-- fechas de salida y retorno
-- condiciones, cupos y política de cancelación
+- `rumbo.country`
+- `rumbo.duration`
+- `rumbo.included`, separado por `|`
+- `rumbo.rating`
+- `rumbo.reviews`
+- `rumbo.departure_date` y `rumbo.return_date`
+- `rumbo.conditions`, `rumbo.capacity` y `rumbo.cancellation_policy`
+
+El despliegue crea o verifica estas definiciones de forma idempotente y las
+expone en la Store API. El mapeo y los formatos están versionados en
+[`SPREE_CATALOG_CONTRACT.md`](SPREE_CATALOG_CONTRACT.md).
 
 El endpoint `/api/catalog` puede leer productos de la Store API v3.
 `/api/airports` encapsula el servicio Name Suggestion de AirLabs.

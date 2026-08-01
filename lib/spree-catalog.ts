@@ -1,7 +1,7 @@
 import {
   demoTravelPackages,
   type TravelPackage,
-} from "./travel-packages";
+} from "./travel-packages.ts";
 
 type SpreePrice = {
   display_amount?: string | null;
@@ -9,7 +9,10 @@ type SpreePrice = {
 };
 
 type SpreeCustomField = {
+  key?: string;
+  label?: string;
   name?: string;
+  type?: string;
   value?: unknown;
 };
 
@@ -27,7 +30,7 @@ type SpreeProduct = {
 };
 
 type SpreeProductResponse = {
-  data?: SpreeProduct[];
+  data: SpreeProduct[];
 };
 
 export type CatalogResult = {
@@ -39,23 +42,173 @@ export type CatalogResult = {
 const FALLBACK_MESSAGE =
   "Catálogo demostrativo: las tarifas deben confirmarse antes de cobrar.";
 
+export const RUMBO_PRODUCT_FIELD_KEYS = {
+  country: "rumbo.country",
+  duration: "rumbo.duration",
+  included: "rumbo.included",
+  rating: "rumbo.rating",
+  reviews: "rumbo.reviews",
+} as const;
+
+type UnknownRecord = Record<string, unknown>;
+
+function record(value: unknown): UnknownRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function requiredString(
+  source: UnknownRecord,
+  property: string,
+  context: string,
+): string {
+  const value = optionalString(source[property]);
+  if (!value?.trim()) {
+    throw new Error(`${context}.${property} debe ser un texto no vacío`);
+  }
+  return value;
+}
+
+function parsePrice(value: unknown, context: string): SpreePrice | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  const source = record(value);
+  if (!source) throw new Error(`${context} debe ser un objeto`);
+
+  return {
+    display_amount: optionalString(source.display_amount),
+    display_compare_at_amount: optionalString(
+      source.display_compare_at_amount,
+    ),
+  };
+}
+
+function parseCustomField(value: unknown, context: string): SpreeCustomField {
+  const source = record(value);
+  if (!source) throw new Error(`${context} debe ser un objeto`);
+
+  const key = optionalString(source.key);
+  const label = optionalString(source.label);
+  const name = optionalString(source.name);
+
+  if (!key && !label && !name) {
+    throw new Error(`${context} debe incluir key, label o name`);
+  }
+
+  return {
+    key,
+    label,
+    name,
+    type: optionalString(source.type),
+    value: source.value,
+  };
+}
+
+function parseProduct(value: unknown, index: number): SpreeProduct {
+  const context = `Spree.data[${index}]`;
+  const source = record(value);
+  if (!source) throw new Error(`${context} debe ser un objeto`);
+
+  let tags: string[] | undefined;
+  if (source.tags !== undefined) {
+    if (
+      !Array.isArray(source.tags) ||
+      !source.tags.every((tag) => typeof tag === "string")
+    ) {
+      throw new Error(`${context}.tags debe ser una lista de textos`);
+    }
+    tags = source.tags;
+  }
+
+  let customFields: SpreeCustomField[] | undefined;
+  if (source.custom_fields !== undefined) {
+    if (!Array.isArray(source.custom_fields)) {
+      throw new Error(`${context}.custom_fields debe ser una lista`);
+    }
+    customFields = source.custom_fields.map((customField, customFieldIndex) =>
+      parseCustomField(
+        customField,
+        `${context}.custom_fields[${customFieldIndex}]`,
+      ),
+    );
+  }
+
+  return {
+    id: requiredString(source, "id", context),
+    name: requiredString(source, "name", context),
+    slug: requiredString(source, "slug", context),
+    description:
+      source.description === null
+        ? null
+        : optionalString(source.description),
+    thumbnail_url:
+      source.thumbnail_url === null
+        ? null
+        : optionalString(source.thumbnail_url),
+    tags,
+    price: parsePrice(source.price, `${context}.price`),
+    original_price:
+      source.original_price === null
+        ? null
+        : parsePrice(source.original_price, `${context}.original_price`),
+    default_variant_id: optionalString(source.default_variant_id),
+    custom_fields: customFields,
+  };
+}
+
+export function parseSpreeProductResponse(
+  payload: unknown,
+): SpreeProductResponse {
+  const source = record(payload);
+  if (!source || !Array.isArray(source.data)) {
+    throw new Error("La respuesta de Spree debe incluir una lista data");
+  }
+
+  return {
+    data: source.data.map(parseProduct),
+  };
+}
+
+function matchesField(field: SpreeCustomField, name: string): boolean {
+  const normalizedName = name.trim().toLowerCase();
+  const shortName = normalizedName.split(".").at(-1) ?? normalizedName;
+
+  return [field.key, field.name, field.label]
+    .filter((value): value is string => typeof value === "string")
+    .some((value) => {
+      const normalizedValue = value.trim().toLowerCase();
+      return (
+        normalizedValue === normalizedName ||
+        normalizedValue === shortName ||
+        normalizedValue.endsWith(`.${shortName}`)
+      );
+    });
+}
+
 function field(product: SpreeProduct, name: string): string | undefined {
   const value = product.custom_fields?.find(
-    (item) => item.name?.toLowerCase() === name.toLowerCase(),
+    (item) => matchesField(item, name),
   )?.value;
 
   if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return undefined;
 }
 
 function listField(product: SpreeProduct, name: string): string[] | undefined {
   const value = product.custom_fields?.find(
-    (item) => item.name?.toLowerCase() === name.toLowerCase(),
+    (item) => matchesField(item, name),
   )?.value;
 
   if (Array.isArray(value)) {
     const items = value.filter(
-      (item): item is string => typeof item === "string" && item.trim().length > 0,
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0,
     );
     return items.length ? items : undefined;
   }
@@ -71,7 +224,7 @@ function listField(product: SpreeProduct, name: string): string[] | undefined {
   return undefined;
 }
 
-function mapProduct(
+export function mapSpreeProduct(
   product: SpreeProduct,
   index: number,
 ): TravelPackage {
@@ -80,12 +233,16 @@ function mapProduct(
   return {
     id: product.slug || product.id,
     destination: product.name,
-    country: field(product, "country") ?? "Destino internacional",
+    country:
+      field(product, RUMBO_PRODUCT_FIELD_KEYS.country) ??
+      "Destino internacional",
     image: product.thumbnail_url ?? fallback.image,
     imagePosition: "center",
-    duration: field(product, "duration") ?? "Duración por confirmar",
-    rating: field(product, "rating") ?? "Nuevo",
-    reviews: field(product, "reviews") ?? "0",
+    duration:
+      field(product, RUMBO_PRODUCT_FIELD_KEYS.duration) ??
+      "Duración por confirmar",
+    rating: field(product, RUMBO_PRODUCT_FIELD_KEYS.rating) ?? "Nuevo",
+    reviews: field(product, RUMBO_PRODUCT_FIELD_KEYS.reviews) ?? "0",
     price: product.price?.display_amount ?? "Consultar",
     previousPrice:
       product.original_price?.display_amount ??
@@ -93,7 +250,7 @@ function mapProduct(
       "",
     tag: product.tags?.[0] ?? "Paquete Rumbo",
     included:
-      listField(product, "included") ?? [
+      listField(product, RUMBO_PRODUCT_FIELD_KEYS.included) ?? [
         "Itinerario por confirmar",
         "Asesoría de viaje",
       ],
@@ -130,8 +287,8 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
       throw new Error(`Spree respondió ${response.status}`);
     }
 
-    const payload = (await response.json()) as SpreeProductResponse;
-    const packages = (payload.data ?? []).map(mapProduct);
+    const payload = parseSpreeProductResponse(await response.json());
+    const packages = payload.data.map(mapSpreeProduct);
 
     if (!packages.length) {
       return {

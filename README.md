@@ -57,3 +57,6 @@ La definición completa del alcance y la arquitectura está en
 
 Los pasos y variables de las integraciones están en
 [`docs/TRAVEL_API_INTEGRATIONS.md`](docs/TRAVEL_API_INTEGRATIONS.md).
+
+El contrato exacto de campos entre Spree y el storefront está en
+[`docs/SPREE_CATALOG_CONTRACT.md`](docs/SPREE_CATALOG_CONTRACT.md).
