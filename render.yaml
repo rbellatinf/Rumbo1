@@ -1,5 +1,5 @@
 # Render Blueprint for the Rumbo MVP.
-# This creates one Spree web service and one managed PostgreSQL database.
+# This creates one Spree web service, one queue, and one managed PostgreSQL database.
 services:
   - type: web
     name: rumbo1-spree
@@ -14,18 +14,29 @@ services:
         fromDatabase:
           name: rumbo1-postgres
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: rumbo1-redis
+          type: keyvalue
+          property: connectionString
       - key: SECRET_KEY_BASE
         generateValue: true
       - key: RAILS_LOG_LEVEL
         value: info
       - key: WEB_CONCURRENCY
         value: "1"
-      - key: SOLID_QUEUE_IN_PUMA
-        value: "true"
       - key: MISSION_CONTROL_USER
         value: jobs
       - key: MISSION_CONTROL_PASSWORD
         generateValue: true
+
+  - type: keyvalue
+    name: rumbo1-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    persistenceMode: "off"
+    ipAllowList: []
 
 databases:
   - name: rumbo1-postgres
