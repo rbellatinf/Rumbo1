@@ -4,3 +4,6 @@ FROM ghcr.io/spree/spree:5.4.0
 # Spree. The SQL is idempotent and is applied by the Render start command.
 COPY backend/postgres/init/010_rumbo_core.sql /opt/rumbo/db/010_rumbo_core.sql
 COPY backend/spree/apply_rumbo_schema.rb /opt/rumbo/apply_rumbo_schema.rb
+COPY --chmod=755 backend/spree/start-rumbo.sh /usr/local/bin/start-rumbo
+
+CMD ["/usr/local/bin/start-rumbo"]
