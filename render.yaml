@@ -9,12 +9,6 @@ services:
     dockerfilePath: ./backend/spree/Dockerfile
     dockerContext: .
     healthCheckPath: /up
-    # Free services cannot use Render's pre-deploy command. Run the
-    # idempotent database setup before starting Rails instead.
-    dockerCommand: >-
-      /bin/bash -c "./bin/rails db:prepare &&
-      ./bin/rails runner /opt/rumbo/apply_rumbo_schema.rb &&
-      exec ./bin/rails server -b 0.0.0.0"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
