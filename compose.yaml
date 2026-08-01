@@ -24,7 +24,7 @@ services:
       retries: 10
 
   spree:
-    image: ghcr.io/spree/spree:5.4
+    image: ghcr.io/spree/spree:5.4.0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -47,4 +47,3 @@ services:
 
 volumes:
   rumbo_postgres_data:
-

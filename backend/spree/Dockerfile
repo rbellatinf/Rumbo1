@@ -1,4 +1,4 @@
-FROM ghcr.io/spree/spree:5.4
+FROM ghcr.io/spree/spree:5.4.0
 
 # Keep Rumbo's application tables in the same managed PostgreSQL database as
 # Spree. The SQL is idempotent and is applied by the Render start command.
