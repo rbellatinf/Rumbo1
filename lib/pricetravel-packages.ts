@@ -1,7 +1,7 @@
 import {
   demoTravelPackages,
   type TravelPackage,
-} from "./travel-packages";
+} from "./travel-packages.ts";
 
 export type PackageSearchInput = {
   originIata: string;
