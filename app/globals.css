@@ -137,6 +137,7 @@ button {
   gap: 8px;
   padding: 8px 0;
   font-size: 14px;
+  text-decoration: none;
 }
 
 .header-action svg:first-child {
@@ -197,7 +198,7 @@ button {
 
 .search-shell {
   margin-top: 42px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.97);
@@ -253,7 +254,7 @@ button {
 .search-fields {
   min-height: 122px;
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 52px minmax(150px, 1fr) minmax(190px, 1fr) minmax(175px, 0.9fr) 156px;
+  grid-template-columns: minmax(150px, 1fr) 52px minmax(150px, 1fr) minmax(248px, 1.3fr) minmax(158px, 0.8fr) 148px;
   align-items: center;
   gap: 0;
   padding: 18px 22px 20px 28px;
@@ -269,14 +270,16 @@ label.search-field {
   cursor: text;
 }
 
-.search-field > span {
+.search-field > span,
+.airport-field > label > span {
   display: block;
   margin-bottom: 8px;
   color: var(--slate);
   font-size: 13px;
 }
 
-.search-field > div {
+.search-field > div,
+.airport-field > label > div {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -299,6 +302,113 @@ label.search-field {
   background: transparent;
   color: var(--ink);
   font-weight: 650;
+}
+
+.airport-field {
+  position: relative;
+}
+
+.airport-field > label {
+  display: block;
+  cursor: text;
+}
+
+.field-loader {
+  width: 18px !important;
+  height: 18px !important;
+  animation: spin 700ms linear infinite;
+}
+
+.airport-dropdown {
+  display: block !important;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 4px);
+  left: 14px;
+  width: min(390px, calc(100vw - 48px));
+  max-height: 330px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--white);
+  box-shadow: 0 20px 48px rgba(6, 28, 51, 0.22);
+}
+
+.airport-dropdown button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.airport-dropdown button:hover,
+.airport-dropdown button:focus-visible {
+  background: #f7f9fc;
+}
+
+.airport-code {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 10px;
+  background: #fff1ed;
+  color: var(--coral-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.airport-dropdown strong,
+.airport-dropdown small {
+  display: block;
+}
+
+.airport-dropdown strong {
+  color: var(--navy);
+  font-size: 13px;
+}
+
+.airport-dropdown small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--slate);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.airport-dropdown p {
+  margin: 0;
+  padding: 14px;
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.date-field {
+  cursor: default !important;
+}
+
+.date-inputs {
+  gap: 7px !important;
+}
+
+.date-inputs input {
+  width: 104px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.date-inputs > span {
+  color: var(--slate);
+  font-size: 12px;
 }
 
 .field-button {
@@ -364,9 +474,59 @@ label.search-field {
   background: var(--coral-dark);
 }
 
+.search-button:disabled {
+  cursor: wait;
+  transform: none;
+  opacity: 0.72;
+}
+
 .search-button svg {
   width: 19px;
   height: 19px;
+}
+
+.button-loader {
+  animation: spin 700ms linear infinite;
+}
+
+.integration-strip {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 9px 28px 12px;
+  border-top: 1px solid #f0f2f5;
+  color: var(--slate);
+  font-size: 10px;
+}
+
+.integration-strip span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.integration-strip svg {
+  width: 14px;
+  height: 14px;
+  color: #d97706;
+}
+
+.integration-strip strong {
+  color: var(--ink);
+}
+
+.integration-strip span.is-live svg,
+.integration-strip span.is-live strong {
+  color: #1f7a59;
+}
+
+.search-error {
+  margin: 0;
+  padding: 0 28px 14px;
+  color: #b42318;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .trust-row {
@@ -512,6 +672,52 @@ label.search-field {
   width: 18px;
 }
 
+.catalog-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 28px;
+  padding: 12px 15px;
+  border: 1px solid #fed7aa;
+  border-radius: 13px;
+  background: #fff9ed;
+  color: #9a3412;
+  font-size: 11px;
+}
+
+.catalog-status > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.catalog-status strong {
+  flex: 0 0 auto;
+}
+
+.catalog-status p {
+  margin: 0;
+  color: #a15c00;
+}
+
+.catalog-status.is-live {
+  border-color: #a6dec9;
+  background: #eefbf6;
+  color: #1f7a59;
+}
+
+.catalog-status.is-live > span {
+  background: #2f9d77;
+  box-shadow: 0 0 0 4px rgba(47, 157, 119, 0.12);
+}
+
+.catalog-status.is-live p {
+  color: #3b8067;
+}
+
 .deal-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -586,6 +792,11 @@ label.search-field {
   gap: 4px;
   color: var(--ink);
   font-weight: 650;
+}
+
+.deal-meta small {
+  color: #667085;
+  font-size: inherit;
 }
 
 .deal-meta svg {
@@ -988,6 +1199,68 @@ label.search-field {
   color: var(--slate);
 }
 
+.traveller-form {
+  text-align: left;
+}
+
+.traveller-form > .section-kicker,
+.traveller-form > h2,
+.traveller-form > p,
+.booking-confirmation {
+  text-align: center;
+}
+
+.traveller-fields {
+  display: grid;
+  gap: 14px;
+  margin: 26px 0;
+}
+
+.traveller-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.traveller-fields input {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--white);
+  color: var(--ink);
+  outline: 0;
+}
+
+.traveller-fields input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.12);
+}
+
+.booking-reference {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 11px 20px;
+  margin: 26px 0;
+  padding: 20px;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.booking-reference span {
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.booking-reference strong {
+  color: var(--navy);
+  text-align: right;
+  font-size: 12px;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
@@ -1015,6 +1288,12 @@ input:focus-visible {
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 1100px) {
   .desktop-nav {
     gap: 18px;
@@ -1035,6 +1314,10 @@ input:focus-visible {
 
   .search-button {
     min-height: 60px;
+  }
+
+  .airport-dropdown {
+    top: calc(100% - 2px);
   }
 
   .deal-grid {
@@ -1113,6 +1396,13 @@ input:focus-visible {
     padding: 8px 18px 18px;
   }
 
+  .integration-strip {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+    padding: 12px 18px;
+  }
+
   .search-field {
     min-height: 72px;
     padding: 14px 4px;
@@ -1130,6 +1420,16 @@ input:focus-visible {
   .search-button {
     min-height: 58px;
     margin: 16px 0 0;
+  }
+
+  .airport-dropdown {
+    top: 66px;
+    left: -4px;
+  }
+
+  .date-inputs input {
+    flex: 1;
+    width: auto;
   }
 
   .trust-row {
@@ -1170,6 +1470,16 @@ input:focus-visible {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .catalog-status {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .catalog-status p {
+    flex-basis: 100%;
+    padding-left: 17px;
   }
 
   .deal-grid {
