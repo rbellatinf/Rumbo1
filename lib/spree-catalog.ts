@@ -371,7 +371,6 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
           accept: "application/json",
           "x-spree-api-key": apiKey,
         },
-        cache: "no-store",
       },
     );
 
