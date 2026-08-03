@@ -5,7 +5,7 @@ module Spree
     module V3
       module Store
         class BookingRequestsController < ResourceController
-          before_action :authenticate_api_key!
+          prepend_before_action :authenticate_api_key!
 
           def create
             idempotency_key = params[:idempotency_key].to_s
