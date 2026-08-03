@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://rumbo1-spree.onrender.com"
+        ],
+        "methods": [
+          "PUT"
+        ],
+        "headers": [
+          "*"
+        ]
+      },
+      "exposeHeaders": [
+        "Origin",
+        "Content-Type",
+        "Content-MD5",
+        "Content-Disposition"
+      ],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
