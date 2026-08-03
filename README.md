@@ -8,18 +8,21 @@ licencias, enlaces de referido y comisión directa.
 - buscador y catálogo adaptable a celular y escritorio;
 - detalle y reserva automática con bloqueo temporal de precio y cupos;
 - consulta de estado mediante referencia y correo del viajero;
+- handoff firmado hacia una pasarela alojada y webhook de pago idempotente;
 - portal demostrativo del asociado;
 - backoffice demostrativo;
 - adaptador para el catálogo de Spree Store API v3;
 - autocompletado mundial de aeropuertos preparado para AirLabs Name Suggestion;
 - buscador de paquetes preparado para el contrato B2B de PriceTravel;
-- PostgreSQL con inventario, bloqueos de cupos, pagos preparados, reservas,
-  historial de estados, asociados, licencias, atribuciones, comisiones y
-  auditoría;
+- PostgreSQL con inventario, bloqueos de cupos, pagos, eventos de pasarela,
+  reservas, historial de estados, asociados, licencias, atribuciones,
+  comisiones y auditoría;
 - entorno reproducible con Spree Commerce 5.4 y PostgreSQL 18.
 
 Mientras el backend no esté configurado, las tarifas aparecen claramente como
-demostrativas y no se generan cobros ni tickets.
+demostrativas y no se generan cobros ni tickets. La capa de pagos no realiza
+cargos por sí sola: necesita un adaptador para la API oficial de la pasarela
+seleccionada.
 
 Los conectores externos nunca envían secretos al navegador. Sin las
 credenciales de sandbox, AirLabs usa una lista local de respaldo y
@@ -62,3 +65,6 @@ Los pasos y variables de las integraciones están en
 
 El contrato exacto de campos entre Spree y el storefront está en
 [`docs/SPREE_CATALOG_CONTRACT.md`](docs/SPREE_CATALOG_CONTRACT.md).
+
+El handoff, la firma y el webhook normalizado de pagos están en
+[`docs/PAYMENT_GATEWAY_CONTRACT.md`](docs/PAYMENT_GATEWAY_CONTRACT.md).
