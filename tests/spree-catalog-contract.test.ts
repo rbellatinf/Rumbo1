@@ -93,6 +93,14 @@ test("accepts namespaced custom fields from an existing Spree catalog", () => {
   assert.equal(mapSpreeProduct(parsed.data[0], 0).country, "Panamá");
 });
 
+test("accepts tag objects returned by the live Spree Store API", () => {
+  const payload = structuredClone(spreeProductPayload);
+  payload.data[0].tags = [{ id: 1, name: "Oferta" }] as unknown as string[];
+
+  const parsed = parseSpreeProductResponse(payload);
+  assert.equal(mapSpreeProduct(parsed.data[0], 0).tag, "Oferta");
+});
+
 test("rejects a changed Spree response instead of rendering inconsistent data", () => {
   assert.throws(
     () => parseSpreeProductResponse({ data: [{ id: "missing-fields" }] }),
