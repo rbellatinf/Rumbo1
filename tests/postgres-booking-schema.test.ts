@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const viewResetUrl = new URL(
+  "../backend/postgres/init/019_reset_booking_operations_view.sql",
+  import.meta.url,
+);
 const schemaUrl = new URL(
   "../backend/postgres/init/020_rumbo_bookings.sql",
   import.meta.url,
@@ -30,6 +34,17 @@ test("PostgreSQL schema includes durable booking and status history tables", asy
   assert.match(sql, /rumbo_booking_write_history_insert_trigger/i);
   assert.match(sql, /rumbo_booking_write_audit_trigger/i);
   assert.match(sql, /CREATE OR REPLACE VIEW rumbo_booking_operations/i);
+});
+
+test("booking operation views can be rebuilt on every Render restart", async () => {
+  const [resetSql, automaticSql] = await Promise.all([
+    readFile(viewResetUrl, "utf8"),
+    readFile(automaticSchemaUrl, "utf8"),
+  ]);
+
+  assert.match(resetSql, /DROP VIEW IF EXISTS rumbo_booking_operations/i);
+  assert.match(automaticSql, /DROP VIEW IF EXISTS rumbo_booking_operations/i);
+  assert.match(automaticSql, /CREATE VIEW rumbo_booking_operations/i);
 });
 
 test("PostgreSQL atomically holds inventory and prepares payment tracking", async () => {
