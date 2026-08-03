@@ -40,7 +40,7 @@ test("Spree extension exposes publishable Store API booking routes", async () =>
     controller,
     /class BookingRequestsController < ResourceController/,
   );
-  assert.match(controller, /X-Spree-API-Key|authenticate_api_key|current_store/i);
+  assert.match(controller, /before_action :authenticate_api_key!/);
   assert.match(controller, /find_by_prefix_id!/);
   assert.doesNotMatch(controller, /contact_email.*render json/im);
   assert.match(dockerfile, /rumbo_booking_routes\.rb >> \.\/config\/routes\.rb/);
