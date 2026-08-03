@@ -6,7 +6,9 @@ Spree::Core::Engine.add_routes do
       namespace :store do
         resources :booking_requests, only: %i[create show] do
           get :availability, on: :collection
+          post :payment_session, on: :member
         end
+        post "payment_webhooks/:provider", to: "payment_webhooks#create"
       end
 
       namespace :admin do

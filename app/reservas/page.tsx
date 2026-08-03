@@ -54,6 +54,7 @@ export default function ReservationsPage() {
   const [booking, setBooking] = useState<BookingRecord | null>(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isPreparingPayment, setIsPreparingPayment] = useState(false);
 
   const lookup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -87,6 +88,48 @@ export default function ReservationsPage() {
       setIsLoading(false);
     }
   };
+
+  const preparePayment = async () => {
+    if (!booking) return;
+
+    setMessage("");
+    setIsPreparingPayment(true);
+
+    try {
+      const response = await fetch("/api/payments/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference: booking.reference,
+          email: email.trim().toLowerCase(),
+        }),
+      });
+      const result = (await response.json()) as {
+        booking?: BookingRecord;
+        message?: string;
+      };
+
+      if (!response.ok || !result.booking) {
+        throw new Error(result.message || "No pudimos preparar el pago.");
+      }
+
+      setBooking(result.booking);
+      if (!result.booking.payment_url) {
+        throw new Error("La pasarela todavía no devolvió un enlace de pago.");
+      }
+
+      window.location.assign(result.booking.payment_url);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "No pudimos preparar el pago.",
+      );
+    } finally {
+      setIsPreparingPayment(false);
+    }
+  };
+
+  const paymentPending =
+    booking?.status === "payment_pending" || booking?.status === "payment_failed";
 
   return (
     <main className={styles.page}>
@@ -221,8 +264,7 @@ export default function ReservationsPage() {
                 <strong>La reserva fue cancelada.</strong>
                 Los cupos quedaron liberados y no hay ningún pago pendiente.
               </p>
-            ) : booking.status === "payment_pending" ||
-              booking.status === "payment_failed" ? (
+            ) : paymentPending ? (
               <p>
                 <strong>El precio y los cupos ya están bloqueados.</strong>
                 Falta completar el pago online; no se necesita aprobación manual
@@ -235,6 +277,34 @@ export default function ReservationsPage() {
               </p>
             )}
           </div>
+
+          {paymentPending ? (
+            <div className={styles.paymentActions}>
+              {booking.payment_url ? (
+                <a href={booking.payment_url}>
+                  <CreditCard aria-hidden="true" />
+                  Pagar ahora
+                </a>
+              ) : (
+                <button
+                  disabled={isPreparingPayment}
+                  onClick={preparePayment}
+                  type="button"
+                >
+                  {isPreparingPayment ? (
+                    <LoaderCircle aria-hidden="true" className={styles.spinner} />
+                  ) : (
+                    <CreditCard aria-hidden="true" />
+                  )}
+                  {isPreparingPayment ? "Preparando pago…" : "Preparar pago"}
+                </button>
+              )}
+              <small>
+                Rumbo no recibe ni almacena los datos de tu tarjeta. El cobro se
+                completa en la página segura de la pasarela configurada.
+              </small>
+            </div>
+          ) : null}
         </section>
       ) : (
         <section className={styles.empty}>
