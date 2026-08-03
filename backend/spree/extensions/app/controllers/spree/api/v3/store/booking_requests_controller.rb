@@ -24,6 +24,8 @@ module Spree
             existing = scope.find_by(idempotency_key: idempotency_key)
 
             if existing.present?
+              prepare_checkout(existing)
+              existing.reload
               return render json: serialize_resource(existing), status: :ok
             end
 
@@ -70,6 +72,7 @@ module Spree
             @resource.status = "payment_pending"
 
             if @resource.save
+              prepare_checkout(@resource)
               @resource.reload
               render json: serialize_resource(@resource), status: :created
             else
@@ -77,6 +80,8 @@ module Spree
             end
           rescue ActiveRecord::RecordNotUnique
             existing = scope.find_by!(idempotency_key: idempotency_key)
+            prepare_checkout(existing)
+            existing.reload
             render json: serialize_resource(existing), status: :ok
           rescue Rumbo::OfferInventory::Unavailable => error
             render json: {
@@ -122,6 +127,20 @@ module Spree
                 message: error.message
               }
             }, status: :conflict
+          end
+
+          def payment_session
+            booking = find_resource
+            Rumbo::Payments::CheckoutSession.prepare!(booking)
+            booking.reload
+            render json: serialize_resource(booking), status: :ok
+          rescue Rumbo::Payments::CheckoutSession::Unavailable => error
+            render json: {
+              error: {
+                code: "payment_unavailable",
+                message: error.message
+              }
+            }, status: payment_gateway_configured? ? :conflict : :service_unavailable
           end
 
           protected
@@ -200,6 +219,20 @@ module Spree
               "departure_date" => inventory.departure_date.iso8601,
               "return_date" => inventory.return_date.iso8601
             )
+          end
+
+          def prepare_checkout(booking)
+            return unless payment_gateway_configured?
+
+            Rumbo::Payments::CheckoutSession.prepare!(booking)
+          rescue Rumbo::Payments::CheckoutSession::Unavailable => error
+            Rails.logger.warn(
+              "Rumbo checkout was not prepared for #{booking.reference}: #{error.message}"
+            )
+          end
+
+          def payment_gateway_configured?
+            Rumbo::Payments::CheckoutSession.configured?
           end
 
           def render_capacity_error(error)
