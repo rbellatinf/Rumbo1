@@ -147,7 +147,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE VIEW rumbo_booking_operations AS
+CREATE OR REPLACE VIEW rumbo_booking_hold_operations AS
 SELECT
   b.reference,
   b.status,
