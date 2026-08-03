@@ -9,8 +9,6 @@ module Rumbo
     class CheckoutSession
       class Unavailable < StandardError; end
 
-      ALLOWED_SCHEMES = %w[http https].freeze
-
       def self.configured?
         ENV["RUMBO_PAYMENT_PROVIDER"].present? &&
           ENV["RUMBO_PAYMENT_CHECKOUT_URL"].present? &&
@@ -41,6 +39,10 @@ module Rumbo
         end
 
         provider = ENV.fetch("RUMBO_PAYMENT_PROVIDER").strip.downcase
+        if payment.provider != "unconfigured" && payment.provider != provider
+          raise Unavailable, "La reserva ya está vinculada a otra pasarela."
+        end
+
         checkout_expires_at = [hold.expires_at, 15.minutes.from_now].min
         payload = {
           "amount" => format("%.2f", payment.amount),
@@ -59,19 +61,30 @@ module Rumbo
         )
         checkout_url = build_checkout_url(payload.merge("signature" => signature))
 
-        payment.update!(
-          provider: provider,
-          payment_url: checkout_url,
-          checkout_created_at: Time.current,
-          checkout_expires_at: checkout_expires_at,
-          checkout_signature_digest: Digest::SHA256.hexdigest(signature)
-        )
+        Rumbo::BookingPayment.transaction do
+          payment.lock!
+          if payment.status == "failed"
+            payment.apply_provider_status!("pending")
+            booking.update!(status: "payment_pending")
+            payment.provider_payment_id = nil
+          end
+
+          payment.update!(
+            provider: provider,
+            payment_url: checkout_url,
+            checkout_created_at: Time.current,
+            checkout_expires_at: checkout_expires_at,
+            checkout_signature_digest: Digest::SHA256.hexdigest(signature)
+          )
+        end
         payment
       end
 
       def self.build_checkout_url(payload)
         uri = URI.parse(ENV.fetch("RUMBO_PAYMENT_CHECKOUT_URL"))
-        raise Unavailable, "La URL de checkout no es segura." unless ALLOWED_SCHEMES.include?(uri.scheme)
+        unless secure_checkout_uri?(uri)
+          raise Unavailable, "La URL de checkout no es segura."
+        end
 
         existing_query = URI.decode_www_form(uri.query.to_s)
         uri.query = URI.encode_www_form(existing_query + payload.sort)
@@ -80,6 +93,13 @@ module Rumbo
         raise Unavailable, "La URL de checkout no es válida."
       end
       private_class_method :build_checkout_url
+
+      def self.secure_checkout_uri?(uri)
+        return true if uri.scheme == "https" && uri.host.present?
+
+        uri.scheme == "http" && %w[localhost 127.0.0.1].include?(uri.host)
+      end
+      private_class_method :secure_checkout_uri?
 
       def self.public_webhook_url
         configured = ENV["RUMBO_PAYMENT_WEBHOOK_URL"].to_s.strip
