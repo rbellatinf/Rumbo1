@@ -44,3 +44,34 @@ CREATE INDEX IF NOT EXISTS rumbo_payment_events_payment_idx
 
 CREATE INDEX IF NOT EXISTS rumbo_payment_events_processing_idx
   ON rumbo_payment_events (processing_status, received_at DESC);
+
+CREATE OR REPLACE FUNCTION rumbo_payment_apply_booking_status()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.status = 'pending' THEN
+    UPDATE rumbo_booking_requests
+    SET status = 'payment_pending'
+    WHERE id = NEW.booking_request_id
+      AND status = 'payment_failed';
+  ELSIF NEW.status = 'paid' THEN
+    UPDATE rumbo_booking_requests
+    SET status = 'confirmed'
+    WHERE id = NEW.booking_request_id
+      AND status IN ('payment_pending', 'payment_failed', 'quoted');
+  ELSIF NEW.status = 'failed' THEN
+    UPDATE rumbo_booking_requests
+    SET status = 'payment_failed'
+    WHERE id = NEW.booking_request_id
+      AND status = 'payment_pending';
+  ELSIF NEW.status IN ('cancelled', 'refunded') THEN
+    UPDATE rumbo_booking_requests
+    SET status = 'cancelled'
+    WHERE id = NEW.booking_request_id
+      AND status IN ('payment_pending', 'payment_failed', 'confirmed');
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
