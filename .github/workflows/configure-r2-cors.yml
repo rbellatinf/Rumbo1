@@ -2,6 +2,12 @@ name: Configure Cloudflare R2 CORS
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/cloudflare/r2-cors.json"
+      - ".github/workflows/configure-r2-cors.yml"
 
 permissions:
   contents: read
