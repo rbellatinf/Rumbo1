@@ -16,6 +16,13 @@ type SpreeCustomField = {
   value?: unknown;
 };
 
+type SpreeMedia = {
+  media_type?: string;
+  position?: number;
+  original_url?: string;
+  large_url?: string;
+};
+
 type SpreeProduct = {
   id: string;
   name: string;
@@ -27,6 +34,7 @@ type SpreeProduct = {
   original_price?: SpreePrice | null;
   default_variant_id?: string;
   custom_fields?: SpreeCustomField[];
+  media?: SpreeMedia[];
 };
 
 type SpreeProductResponse = {
@@ -109,6 +117,26 @@ function parseCustomField(value: unknown, context: string): SpreeCustomField {
   };
 }
 
+function parseMedia(value: unknown, context: string): SpreeMedia {
+  const source = record(value);
+  if (!source) throw new Error(`${context} debe ser un objeto`);
+
+  const position = source.position;
+  if (
+    position !== undefined &&
+    (typeof position !== "number" || !Number.isFinite(position))
+  ) {
+    throw new Error(`${context}.position debe ser un número`);
+  }
+
+  return {
+    media_type: optionalString(source.media_type),
+    position: typeof position === "number" ? position : undefined,
+    original_url: optionalString(source.original_url),
+    large_url: optionalString(source.large_url),
+  };
+}
+
 function parseTag(value: unknown, context: string): string {
   if (typeof value === "string" && value.trim()) return value.trim();
 
@@ -147,6 +175,16 @@ function parseProduct(value: unknown, index: number): SpreeProduct {
     );
   }
 
+  let media: SpreeMedia[] | undefined;
+  if (source.media !== undefined) {
+    if (!Array.isArray(source.media)) {
+      throw new Error(`${context}.media debe ser una lista`);
+    }
+    media = source.media.map((item, mediaIndex) =>
+      parseMedia(item, `${context}.media[${mediaIndex}]`),
+    );
+  }
+
   return {
     id: requiredString(source, "id", context),
     name: requiredString(source, "name", context),
@@ -167,6 +205,7 @@ function parseProduct(value: unknown, index: number): SpreeProduct {
         : parsePrice(source.original_price, `${context}.original_price`),
     default_variant_id: optionalString(source.default_variant_id),
     custom_fields: customFields,
+    media,
   };
 }
 
@@ -233,9 +272,53 @@ function listField(product: SpreeProduct, name: string): string[] | undefined {
   return undefined;
 }
 
+function normalizeSpreeAssetUrl(
+  value: string | undefined,
+  spreeBaseUrl?: string,
+): string | undefined {
+  if (!value) return undefined;
+
+  try {
+    const url = new URL(value, spreeBaseUrl);
+    const pointsToLocalhost = ["localhost", "127.0.0.1", "0.0.0.0"].includes(
+      url.hostname,
+    );
+
+    if (pointsToLocalhost && spreeBaseUrl) {
+      const publicOrigin = new URL(spreeBaseUrl);
+      return new URL(
+        `${url.pathname}${url.search}${url.hash}`,
+        publicOrigin,
+      ).toString();
+    }
+
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function productImage(
+  product: SpreeProduct,
+  spreeBaseUrl?: string,
+): string | undefined {
+  const imageMedia = product.media
+    ?.filter((item) => item.media_type !== "video")
+    .sort((left, right) => (left.position ?? 0) - (right.position ?? 0))[0];
+
+  return normalizeSpreeAssetUrl(
+    imageMedia?.original_url ??
+      imageMedia?.large_url ??
+      product.thumbnail_url ??
+      undefined,
+    spreeBaseUrl,
+  );
+}
+
 export function mapSpreeProduct(
   product: SpreeProduct,
   index: number,
+  spreeBaseUrl?: string,
 ): TravelPackage {
   const fallback = demoTravelPackages[index % demoTravelPackages.length];
 
@@ -245,7 +328,7 @@ export function mapSpreeProduct(
     country:
       field(product, RUMBO_PRODUCT_FIELD_KEYS.country) ??
       "Destino internacional",
-    image: product.thumbnail_url ?? fallback.image,
+    image: productImage(product, spreeBaseUrl) ?? fallback.image,
     imagePosition: "center",
     duration:
       field(product, RUMBO_PRODUCT_FIELD_KEYS.duration) ??
@@ -288,7 +371,6 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
           accept: "application/json",
           "x-spree-api-key": apiKey,
         },
-        next: { revalidate: 300 },
       },
     );
 
@@ -297,7 +379,9 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
     }
 
     const payload = parseSpreeProductResponse(await response.json());
-    const packages = payload.data.map(mapSpreeProduct);
+    const packages = payload.data.map((product, index) =>
+      mapSpreeProduct(product, index, baseUrl),
+    );
 
     if (!packages.length) {
       return {
