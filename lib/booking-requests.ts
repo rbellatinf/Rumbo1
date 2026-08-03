@@ -2,12 +2,25 @@ export const BOOKING_STATUSES = [
   "new",
   "validating",
   "quoted",
+  "held",
+  "payment_pending",
+  "paid",
   "confirmed",
   "cancelled",
   "expired",
 ] as const;
 
+export const PAYMENT_STATUSES = [
+  "not_started",
+  "pending",
+  "paid",
+  "failed",
+  "cancelled",
+  "expired",
+] as const;
+
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type ContactChannel = "whatsapp" | "phone" | "email";
 
 export type BookingRequestInput = {
@@ -50,6 +63,7 @@ export type BookingRecord = {
   id: string;
   reference: string;
   status: BookingStatus;
+  payment_status: PaymentStatus;
   product_name: string;
   country?: string | null;
   departure_date?: string | null;
@@ -57,6 +71,11 @@ export type BookingRecord = {
   adults: number;
   children: number;
   contact_channel: ContactChannel;
+  price_per_person?: string | null;
+  price_total?: string | null;
+  currency?: string | null;
+  hold_expires_at?: string | null;
+  hold_active: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -124,6 +143,11 @@ function integer(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
+function decimalText(value: unknown): string | undefined {
+  const text = cleanText(value, 32);
+  return /^\d+(?:\.\d{1,2})?$/.test(text) ? text : undefined;
+}
+
 function iata(value: unknown): string | undefined {
   const code = cleanText(value, 3).toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : undefined;
@@ -134,6 +158,11 @@ function isoDate(value: unknown): string | undefined {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(date))
     ? date
     : undefined;
+}
+
+function isoDateTime(value: unknown): string | undefined {
+  const dateTime = cleanText(value, 40);
+  return dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : undefined;
 }
 
 function currencyFromPrice(price?: string): string | undefined {
@@ -299,12 +328,23 @@ export function parseBookingRecord(value: unknown): BookingRecord {
 
   const reference = cleanText(source.reference, 24);
   const status = cleanText(source.status, 20) as BookingStatus;
+  const paymentStatusValue = cleanText(source.payment_status, 20);
+  const paymentStatus = (
+    (PAYMENT_STATUSES as readonly string[]).includes(paymentStatusValue)
+      ? paymentStatusValue
+      : "not_started"
+  ) as PaymentStatus;
   const productName = cleanText(source.product_name, 200);
-  const createdAt = cleanText(source.created_at, 40);
-  const updatedAt = cleanText(source.updated_at, 40);
+  const createdAt = isoDateTime(source.created_at);
+  const updatedAt = isoDateTime(source.updated_at);
   const adults = integer(source.adults);
   const children = integer(source.children);
   const channel = cleanText(source.contact_channel, 20) as ContactChannel;
+  const pricePerPerson = decimalText(source.price_per_person);
+  const priceTotal = decimalText(source.price_total);
+  const currency = optionalText(source.currency, 3)?.toUpperCase();
+  const holdExpiresAt = isoDateTime(source.hold_expires_at);
+  const requiresHoldTerms = ["held", "payment_pending", "paid"].includes(status);
 
   if (
     !reference ||
@@ -314,7 +354,8 @@ export function parseBookingRecord(value: unknown): BookingRecord {
     !updatedAt ||
     adults === null ||
     children === null ||
-    !(["whatsapp", "phone", "email"] as string[]).includes(channel)
+    !(["whatsapp", "phone", "email"] as string[]).includes(channel) ||
+    (requiresHoldTerms && (!pricePerPerson || !priceTotal || !currency || !holdExpiresAt))
   ) {
     throw new Error("La respuesta de reserva cambió de formato.");
   }
@@ -323,6 +364,7 @@ export function parseBookingRecord(value: unknown): BookingRecord {
     id: cleanText(source.id, 40) || reference,
     reference,
     status,
+    payment_status: paymentStatus,
     product_name: productName,
     country: optionalText(source.country, 100),
     departure_date: optionalText(source.departure_date, 10),
@@ -330,6 +372,11 @@ export function parseBookingRecord(value: unknown): BookingRecord {
     adults,
     children,
     contact_channel: channel,
+    price_per_person: pricePerPerson,
+    price_total: priceTotal,
+    currency,
+    hold_expires_at: holdExpiresAt,
+    hold_active: source.hold_active === true,
     created_at: createdAt,
     updated_at: updatedAt,
   };
@@ -339,7 +386,10 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   new: "Recibida",
   validating: "Validando disponibilidad",
   quoted: "Cotización enviada",
+  held: "Tarifa bloqueada",
+  payment_pending: "Pago pendiente",
+  paid: "Pago recibido",
   confirmed: "Confirmada",
   cancelled: "Cancelada",
-  expired: "Cotización vencida",
+  expired: "Bloqueo vencido",
 };
