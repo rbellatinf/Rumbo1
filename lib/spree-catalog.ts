@@ -109,6 +109,16 @@ function parseCustomField(value: unknown, context: string): SpreeCustomField {
   };
 }
 
+function parseTag(value: unknown, context: string): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+
+  const source = record(value);
+  const name = source ? optionalString(source.name)?.trim() : undefined;
+  if (name) return name;
+
+  throw new Error(`${context} debe ser un texto o un objeto con name`);
+}
+
 function parseProduct(value: unknown, index: number): SpreeProduct {
   const context = `Spree.data[${index}]`;
   const source = record(value);
@@ -116,13 +126,12 @@ function parseProduct(value: unknown, index: number): SpreeProduct {
 
   let tags: string[] | undefined;
   if (source.tags !== undefined) {
-    if (
-      !Array.isArray(source.tags) ||
-      !source.tags.every((tag) => typeof tag === "string")
-    ) {
-      throw new Error(`${context}.tags debe ser una lista de textos`);
+    if (!Array.isArray(source.tags)) {
+      throw new Error(`${context}.tags debe ser una lista`);
     }
-    tags = source.tags;
+    tags = source.tags.map((tag, tagIndex) =>
+      parseTag(tag, `${context}.tags[${tagIndex}]`),
+    );
   }
 
   let customFields: SpreeCustomField[] | undefined;
