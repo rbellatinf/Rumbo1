@@ -14,9 +14,12 @@ module Spree
 
           def create
             provider = params[:provider].to_s.strip.downcase
+            raise ArgumentError unless provider.match?(/\A[a-z0-9_-]{1,40}\z/)
+
             raw_body = request.raw_post
             authenticate_webhook!(provider, raw_body)
             payload = JSON.parse(raw_body)
+            payload_digest = Digest::SHA256.hexdigest(raw_body)
 
             event_id = required_text(payload, "event_id", 160)
             existing = Rumbo::PaymentEvent.find_by(
@@ -24,7 +27,7 @@ module Spree
               provider_event_id: event_id
             )
             if existing.present?
-              return render json: event_response(existing, duplicate: true), status: :ok
+              return render_existing_event(existing, payload_digest)
             end
 
             booking = Rumbo::BookingRequest.find_by!(
@@ -35,10 +38,13 @@ module Spree
 
             provider_payment_id = required_text(payload, "provider_payment_id", 160)
             payment_status = required_text(payload, "status", 20).downcase
-            event_type = payload["event_type"].to_s.strip.presence || "payment.#{payment_status}"
+            event_type = if payload["event_type"].present?
+                           required_text(payload, "event_type", 80)
+                         else
+                           "payment.#{payment_status}"
+                         end
             amount = BigDecimal(payload.fetch("amount").to_s)
             currency = required_text(payload, "currency", 3).upcase
-            payload_digest = Digest::SHA256.hexdigest(raw_body)
 
             event_attributes = {
               booking_payment: payment,
@@ -83,16 +89,12 @@ module Spree
             end
 
             render json: event_response(event), status: :ok
-          rescue JSON::ParserError, KeyError, ArgumentError
+          rescue JSON::ParserError, KeyError, ArgumentError, ActiveRecord::RecordInvalid
             render_error("invalid_payload", "El evento de pago no tiene un formato válido.", :unprocessable_entity)
           rescue ActiveRecord::RecordNotFound
             render_error("payment_not_found", "No encontramos el pago asociado al evento.", :not_found)
           rescue ActiveRecord::RecordNotUnique
-            event = Rumbo::PaymentEvent.find_by!(
-              provider: params[:provider].to_s.strip.downcase,
-              provider_event_id: JSON.parse(request.raw_post).fetch("event_id").to_s
-            )
-            render json: event_response(event, duplicate: true), status: :ok
+            render_duplicate_after_race
           rescue Rumbo::BookingPayment::InvalidTransition => error
             render_error("invalid_transition", error.message, :conflict)
           rescue ActiveRecord::StatementInvalid => error
@@ -152,17 +154,47 @@ module Spree
                                payment_status:, amount:, currency:)
             return "provider_mismatch" unless payment.provider == provider
             return "unknown_status" unless Rumbo::BookingPayment::STATUSES.include?(payment_status)
+            return "invalid_amount" if amount.negative?
             return "amount_mismatch" unless payment.amount == amount
             return "currency_mismatch" unless payment.currency == currency
             if payment.provider_payment_id.present? && payment.provider_payment_id != provider_payment_id
               return "provider_payment_id_mismatch"
             end
-            if payment_status == "paid"
+
+            unless payment_status == payment.status ||
+                   Rumbo::BookingPayment::TRANSITIONS.fetch(payment.status).include?(payment_status)
+              return "invalid_transition"
+            end
+
+            if payment_status == "paid" && payment.status != "paid"
               hold = booking.hold
               return "hold_expired" unless hold&.status == "active" && hold.expires_at.future?
             end
 
             nil
+          end
+
+          def render_existing_event(event, payload_digest)
+            if event.payload_digest != payload_digest
+              return render_error(
+                "event_id_conflict",
+                "El identificador del evento ya fue usado con otro contenido.",
+                :conflict
+              )
+            end
+
+            render json: event_response(event, duplicate: true), status: :ok
+          end
+
+          def render_duplicate_after_race
+            payload = JSON.parse(request.raw_post)
+            event = Rumbo::PaymentEvent.find_by!(
+              provider: params[:provider].to_s.strip.downcase,
+              provider_event_id: payload.fetch("event_id").to_s
+            )
+            render_existing_event(event, Digest::SHA256.hexdigest(request.raw_post))
+          rescue JSON::ParserError, KeyError, ActiveRecord::RecordNotFound
+            render_error("event_conflict", "No pudimos resolver el evento duplicado.", :conflict)
           end
 
           def event_response(event, duplicate: false)
