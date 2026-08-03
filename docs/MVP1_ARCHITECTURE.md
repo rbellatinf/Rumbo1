@@ -32,6 +32,28 @@ del usuario cuando se ejecuta en un VPS o entorno cloud.
 | Módulo Rumbo | Asociados, licencias, atribución y comisión directa |
 | PostgreSQL | Persistencia comercial y trazabilidad |
 
+## Solicitudes de reserva
+
+El primer flujo comercial no cobra ni emite. Registra una intención de compra
+que el equipo valida manualmente antes de convertirla en pedido confirmado.
+
+1. El cliente abre un producto real de Spree.
+2. El storefront valida contacto, viajeros, fechas, consentimiento y código de
+   asociado opcional.
+3. `/api/reservations` revalida el contrato y llama a la Store API de Spree con
+   la clave publicable.
+4. Spree guarda la solicitud en `rumbo_booking_requests` dentro del mismo
+   PostgreSQL del comercio y vuelve a resolver el producto por su ID público,
+   evitando aceptar nombres de producto inventados por el navegador.
+5. PostgreSQL genera la referencia, bloquea transiciones inválidas y escribe
+   `rumbo_booking_status_history` y `rumbo_audit_events` mediante gatillos.
+6. El cliente puede consultar únicamente el estado usando referencia y correo;
+   la respuesta pública nunca contiene teléfono ni correo.
+
+La clave de idempotencia evita que un doble toque o reintento cree dos reservas.
+La API administrativa de Spree expone lectura y cambio de estado únicamente con
+una clave secreta de administración.
+
 ## Modelo de comisión
 
 La comisión es de un único nivel y comienza en 6%, configurable por asociado.
@@ -63,6 +85,7 @@ expone en la Store API. El mapeo y los formatos están versionados en
 [`SPREE_CATALOG_CONTRACT.md`](SPREE_CATALOG_CONTRACT.md).
 
 El endpoint `/api/catalog` puede leer productos de la Store API v3.
+`/api/reservations` registra y consulta solicitudes persistentes.
 `/api/airports` encapsula el servicio Name Suggestion de AirLabs.
 `/api/packages` encapsula la búsqueda B2B de PriceTravel. Si las variables de
 conexión todavía no existen, los tres endpoints devuelven datos demostrativos
