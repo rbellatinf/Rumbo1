@@ -6,7 +6,8 @@ COPY backend/postgres/init /opt/rumbo/db
 COPY backend/spree/apply_rumbo_schema.rb /opt/rumbo/apply_rumbo_schema.rb
 COPY backend/spree/ensure_rumbo_metafields.rb /opt/rumbo/ensure_rumbo_metafields.rb
 COPY backend/spree/extensions/app ./app
-COPY backend/spree/extensions/config/initializers/rumbo_booking_routes.rb ./config/initializers/rumbo_booking_routes.rb
+COPY backend/spree/extensions/config/initializers/rumbo_booking_routes.rb /opt/rumbo/rumbo_booking_routes.rb
+RUN printf '\n' >> ./config/routes.rb && cat /opt/rumbo/rumbo_booking_routes.rb >> ./config/routes.rb
 COPY --chmod=755 backend/spree/start-rumbo.sh /usr/local/bin/start-rumbo
 
 CMD ["/usr/local/bin/start-rumbo"]
