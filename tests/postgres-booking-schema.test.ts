@@ -14,6 +14,7 @@ const storeControllerUrl = new URL(
   "../backend/spree/extensions/app/controllers/spree/api/v3/store/booking_requests_controller.rb",
   import.meta.url,
 );
+const dockerfileUrl = new URL("../backend/spree/Dockerfile", import.meta.url);
 
 test("PostgreSQL schema includes durable booking and status history tables", async () => {
   const sql = await readFile(schemaUrl, "utf8");
@@ -28,9 +29,10 @@ test("PostgreSQL schema includes durable booking and status history tables", asy
 });
 
 test("Spree extension exposes publishable Store API booking routes", async () => {
-  const [routes, controller] = await Promise.all([
+  const [routes, controller, dockerfile] = await Promise.all([
     readFile(routesUrl, "utf8"),
     readFile(storeControllerUrl, "utf8"),
+    readFile(dockerfileUrl, "utf8"),
   ]);
 
   assert.match(routes, /resources :booking_requests, only: %i\[create show\]/);
@@ -41,4 +43,5 @@ test("Spree extension exposes publishable Store API booking routes", async () =>
   assert.match(controller, /X-Spree-API-Key|authenticate_api_key|current_store/i);
   assert.match(controller, /find_by_prefix_id!/);
   assert.doesNotMatch(controller, /contact_email.*render json/im);
+  assert.match(dockerfile, /rumbo_booking_routes\.rb >> \.\/config\/routes\.rb/);
 });
