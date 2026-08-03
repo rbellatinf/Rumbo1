@@ -32,7 +32,11 @@ import type {
   AirportOption,
   AirportSearchResult,
 } from "../lib/airlabs-airports";
-import type { BookingRecord, ContactChannel } from "../lib/booking-requests";
+import type {
+  BookingRecord,
+  ContactChannel,
+  OfferAvailability,
+} from "../lib/booking-requests";
 import {
   demoTravelPackages,
   type TravelPackage,
@@ -233,6 +237,24 @@ function dateFromNow(days: number) {
   return value.toISOString().slice(0, 10);
 }
 
+function formatMoney(amount: number, currency: string) {
+  return new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatHoldExpiry(value?: string | null) {
+  if (!value) return "15 minutos";
+
+  return new Intl.DateTimeFormat("es-PE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}
+
 export default function Home() {
   const [activeProduct, setActiveProduct] =
     useState<(typeof products)[number]["id"]>("packages");
@@ -250,7 +272,7 @@ export default function Home() {
   const [packageMode, setPackageMode] = useState<"demo" | "live">("demo");
   const [catalogMode, setCatalogMode] = useState<"demo" | "live">("demo");
   const [catalogMessage, setCatalogMessage] = useState(
-    "Catálogo demostrativo: las tarifas deben confirmarse antes de cobrar.",
+    "Modo demostración: estas referencias no admiten reservas ni cobros.",
   );
   const [selectedDeal, setSelectedDeal] = useState<TravelPackage | null>(null);
   const [bookingStep, setBookingStep] = useState<0 | 1 | 2 | 3>(0);
@@ -269,6 +291,9 @@ export default function Home() {
   const [bookingError, setBookingError] = useState("");
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
   const [bookingResult, setBookingResult] = useState<BookingRecord | null>(null);
+  const [offerAvailability, setOfferAvailability] =
+    useState<OfferAvailability | null>(null);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -384,17 +409,94 @@ export default function Home() {
     setBookingError("");
     setIsSubmittingBooking(false);
     setBookingResult(null);
+    setOfferAvailability(null);
+    setIsCheckingAvailability(false);
+  };
+
+  const checkAvailability = async (
+    deal: TravelPackage,
+    requestedDepartureDate: string,
+    requestedReturnDate: string,
+  ) => {
+    if (deal.provider !== "Spree" || !deal.providerReference) {
+      setOfferAvailability(null);
+      return;
+    }
+
+    setIsCheckingAvailability(true);
+    setBookingError("");
+
+    try {
+      const query = new URLSearchParams({
+        productId: deal.providerReference,
+        departureDate: requestedDepartureDate,
+        returnDate: requestedReturnDate,
+      });
+      const response = await fetch(`/api/availability?${query.toString()}`);
+      const result = (await response.json()) as {
+        availability?: OfferAvailability;
+        message?: string;
+      };
+
+      if (!response.ok || !result.availability) {
+        throw new Error(
+          result.message || "No pudimos comprobar los cupos de esta oferta.",
+        );
+      }
+
+      setOfferAvailability(result.availability);
+      setDepartureDate(result.availability.departure_date);
+      setReturnDate(result.availability.return_date);
+      setSelectedDeal((current) =>
+        current
+          ? {
+              ...current,
+              capacity: result.availability?.remaining_capacity,
+              price: result.availability?.price_display ?? current.price,
+              priceAmount: result.availability?.price_amount,
+              currency: result.availability?.currency,
+              bookable: result.availability?.bookable,
+              variantId: result.availability?.variant_id ?? current.variantId,
+            }
+          : current,
+      );
+    } catch (error) {
+      setOfferAvailability(null);
+      setBookingError(
+        error instanceof Error
+          ? error.message
+          : "No pudimos comprobar los cupos de esta oferta.",
+      );
+    } finally {
+      setIsCheckingAvailability(false);
+    }
   };
 
   const openDeal = (deal: TravelPackage) => {
+    const offerDepartureDate = deal.departureDate ?? departureDate;
+    const offerReturnDate = deal.returnDate ?? returnDate;
     setSelectedDeal(deal);
+    setDepartureDate(offerDepartureDate);
+    setReturnDate(offerReturnDate);
     setBookingIdempotencyKey(createIdempotencyKey());
     setBookingError("");
     setBookingResult(null);
+    setOfferAvailability(null);
+    void checkAvailability(deal, offerDepartureDate, offerReturnDate);
   };
 
   const submitBooking = async () => {
     if (!selectedDeal) return;
+    if (
+      selectedDeal.provider !== "Spree" ||
+      !offerAvailability?.bookable ||
+      offerAvailability.remaining_capacity < adultCount + childCount
+    ) {
+      setBookingError(
+        "No quedan suficientes cupos para todos los viajeros seleccionados.",
+      );
+      return;
+    }
 
     setBookingError("");
     setIsSubmittingBooking(true);
@@ -446,7 +548,7 @@ export default function Home() {
 
       if (!response.ok || !result.booking) {
         throw new Error(
-          result.message || "No pudimos registrar la solicitud.",
+          result.message || "No pudimos crear la reserva.",
         );
       }
 
@@ -456,12 +558,21 @@ export default function Home() {
       setBookingError(
         error instanceof Error
           ? error.message
-          : "No pudimos registrar la solicitud.",
+          : "No pudimos crear la reserva.",
       );
     } finally {
       setIsSubmittingBooking(false);
     }
   };
+
+  const travellerCount = adultCount + childCount;
+  const liveUnitPrice =
+    offerAvailability?.price_amount ?? selectedDeal?.priceAmount;
+  const liveCurrency = offerAvailability?.currency ?? selectedDeal?.currency;
+  const bookingTotal =
+    typeof liveUnitPrice === "number" && liveCurrency
+      ? formatMoney(liveUnitPrice * travellerCount, liveCurrency)
+      : selectedDeal?.price ?? "Por calcular";
 
   return (
     <main>
@@ -734,6 +845,14 @@ export default function Home() {
                   <Clock3 aria-hidden="true" />
                   {deal.duration}
                 </p>
+                {deal.provider === "Spree" && typeof deal.capacity === "number" ? (
+                  <p className="deal-capacity">
+                    <Users aria-hidden="true" />
+                    {deal.capacity > 0
+                      ? `${deal.capacity} cupos configurados`
+                      : "Agotado"}
+                  </p>
+                ) : null}
                 <ul>
                   {deal.included.slice(0, 2).map((item) => (
                     <li key={item}>
@@ -753,7 +872,9 @@ export default function Home() {
                     onClick={() => openDeal(deal)}
                     type="button"
                   >
-                    Ver viaje
+                    {deal.provider === "Spree" && deal.bookable
+                      ? "Reservar"
+                      : "Ver viaje"}
                   </button>
                 </div>
               </div>
@@ -786,7 +907,7 @@ export default function Home() {
         <p>Viajes simples, experiencias enormes.</p>
         <nav aria-label="Enlaces del pie de página">
           <a href="/panel">Portal de asociados</a>
-          <a href="/reservas">Consultar solicitud</a>
+          <a href="/reservas">Consultar reserva</a>
           <a href="#ayuda">Ayuda</a>
           <a href="#condiciones">Condiciones</a>
           <a href="#privacidad">Privacidad</a>
@@ -849,15 +970,42 @@ export default function Home() {
                   </ul>
                   <div className="modal-price">
                     <div>
-                      <span>Precio final desde</span>
+                      <span>Precio por persona</span>
                       <strong>{selectedDeal.price}</strong>
                       <small>por persona · tasas incluidas</small>
                     </div>
-                    <button onClick={() => setBookingStep(1)} type="button">
-                      Continuar reserva
+                    <button
+                      disabled={
+                        isCheckingAvailability ||
+                        selectedDeal.provider !== "Spree" ||
+                        !offerAvailability?.bookable ||
+                        offerAvailability.remaining_capacity < travellerCount
+                      }
+                      onClick={() => setBookingStep(1)}
+                      type="button"
+                    >
+                      {isCheckingAvailability
+                        ? "Comprobando cupos…"
+                        : offerAvailability?.bookable &&
+                            offerAvailability.remaining_capacity >= travellerCount
+                          ? "Reservar ahora"
+                          : "No disponible para reserva"}
                       <ArrowRight aria-hidden="true" />
                     </button>
                   </div>
+                  {offerAvailability ? (
+                    <p className="booking-availability" role="status">
+                      <Check aria-hidden="true" />
+                      Precio vigente · {offerAvailability.remaining_capacity} cupo
+                      {offerAvailability.remaining_capacity === 1 ? "" : "s"} disponible
+                      {offerAvailability.remaining_capacity === 1 ? "" : "s"}
+                    </p>
+                  ) : null}
+                  {bookingError ? (
+                    <p className="booking-error" role="alert">
+                      {bookingError}
+                    </p>
+                  ) : null}
                 </div>
               </>
             ) : bookingStep === 1 ? (
@@ -868,16 +1016,18 @@ export default function Home() {
                 <p className="section-kicker">Reserva segura</p>
                 <h2>Revisa tu viaje</h2>
                 <p>
-                  Estás solicitando <strong>{selectedDeal.destination}</strong>.
-                  Antes de cobrar, Rumbo confirmará disponibilidad y tarifa.
+                  Reservarás <strong>{selectedDeal.destination}</strong> con el
+                  precio y los cupos comprobados en este momento.
                 </p>
                 <div className="booking-summary">
-                  <span>Paquete</span>
+                  <span>Precio por persona</span>
                   <strong>{selectedDeal.price}</strong>
-                  <span>Impuestos y tasas</span>
-                  <strong>Incluidos</strong>
-                  <span>Total referencial</span>
-                  <strong>{selectedDeal.price}</strong>
+                  <span>Viajeros</span>
+                  <strong>{travellerCount}</strong>
+                  <span>Total de la reserva</span>
+                  <strong>{bookingTotal}</strong>
+                  <span>Cupos restantes</span>
+                  <strong>{offerAvailability?.remaining_capacity ?? "—"}</strong>
                 </div>
                 <button
                   className="booking-primary"
@@ -895,7 +1045,8 @@ export default function Home() {
                   Volver al detalle
                 </button>
                 <small>
-                  La disponibilidad y el pago serán confirmados por un asesor.
+                  Al finalizar, el sistema bloqueará los cupos durante 15 minutos
+                  sin intervención de un asesor.
                 </small>
               </div>
             ) : bookingStep === 2 ? (
@@ -906,11 +1057,11 @@ export default function Home() {
                   void submitBooking();
                 }}
               >
-                <p className="section-kicker">Solicitud de reserva</p>
+                <p className="section-kicker">Reserva automática</p>
                 <h2>Datos del viajero principal</h2>
                 <p>
-                  Completa la información para que Rumbo valide disponibilidad,
-                  tarifa y condiciones antes del pago.
+                  Completa la información para bloquear el precio y los cupos
+                  antes del pago.
                 </p>
 
                 <div className="traveller-fields">
@@ -1043,8 +1194,9 @@ export default function Home() {
                     type="checkbox"
                   />
                   <span>
-                    Acepto que Rumbo use estos datos para validar y contactarme
-                    sobre esta solicitud. No se realizará ningún cobro ahora.
+                    Acepto que Rumbo use estos datos para crear la reserva
+                    temporal y contactarme sobre el viaje. No se realizará ningún
+                    cobro hasta ingresar a la pasarela de pago.
                   </span>
                 </label>
 
@@ -1059,7 +1211,7 @@ export default function Home() {
                   disabled={isSubmittingBooking}
                   type="submit"
                 >
-                  {isSubmittingBooking ? "Registrando…" : "Enviar solicitud"}
+                  {isSubmittingBooking ? "Bloqueando cupos…" : "Reservar cupos"}
                   {isSubmittingBooking ? (
                     <LoaderCircle aria-hidden="true" className="button-loader" />
                   ) : (
@@ -1074,7 +1226,8 @@ export default function Home() {
                   Volver al resumen
                 </button>
                 <small>
-                  Este flujo todavía no cobra ni emite tickets automáticamente.
+                  El precio final se calcula en el servidor; el navegador no puede
+                  modificarlo.
                 </small>
               </form>
             ) : (
@@ -1082,16 +1235,27 @@ export default function Home() {
                 <span className="booking-icon">
                   <Check aria-hidden="true" />
                 </span>
-                <p className="section-kicker">Solicitud registrada</p>
-                <h2>Ya está en manos de Rumbo</h2>
+                <p className="section-kicker">Cupos reservados</p>
+                <h2>Tu reserva temporal está creada</h2>
                 <p>
-                  La solicitud de <strong>{travellerName}</strong> para{" "}
-                  <strong>{selectedDeal.destination}</strong> fue guardada y
-                  pasará por validación de disponibilidad y tarifa.
+                  Los cupos de <strong>{travellerName}</strong> para{" "}
+                  <strong>{selectedDeal.destination}</strong> quedaron bloqueados
+                  automáticamente. No requieren aprobación de Rumbo.
                 </p>
                 <div className="booking-reference">
                   <span>Referencia</span>
                   <strong>{bookingResult?.reference}</strong>
+                  <span>Total bloqueado</span>
+                  <strong>
+                    {bookingResult?.total_amount && bookingResult.currency
+                      ? formatMoney(
+                          bookingResult.total_amount,
+                          bookingResult.currency,
+                        )
+                      : bookingTotal}
+                  </strong>
+                  <span>Reserva válida hasta</span>
+                  <strong>{formatHoldExpiry(bookingResult?.hold_expires_at)}</strong>
                   <span>Asociado</span>
                   <strong>{referralCode || "Venta directa"}</strong>
                 </div>
@@ -1100,8 +1264,9 @@ export default function Home() {
                   <Check aria-hidden="true" />
                 </button>
                 <small>
-                  Guarda la referencia. También puedes consultar el estado desde{" "}
-                  <a href="/reservas">Mis solicitudes</a>.
+                  Guarda la referencia. El pago online se habilitará al conectar
+                  la pasarela; mientras tanto puedes consultar el estado desde{" "}
+                  <a href="/reservas">Mis reservas</a>.
                 </small>
               </div>
             )}

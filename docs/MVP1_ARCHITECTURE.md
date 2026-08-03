@@ -24,7 +24,7 @@ del usuario cuando se ejecuta en un VPS o entorno cloud.
 
 | Componente | Responsabilidad |
 | --- | --- |
-| Storefront Rumbo | Búsqueda, catálogo, detalle y solicitud de reserva |
+| Storefront Rumbo | Búsqueda, catálogo, detalle y reserva automática |
 | Adaptador AirLabs | Autocompletado normalizado de ciudades y aeropuertos |
 | Adaptador PriceTravel | Consulta y normalización de paquetes B2B |
 | Spree Store API | Productos, clientes, carritos, pedidos y estado de pagos |
@@ -32,27 +32,28 @@ del usuario cuando se ejecuta en un VPS o entorno cloud.
 | Módulo Rumbo | Asociados, licencias, atribución y comisión directa |
 | PostgreSQL | Persistencia comercial y trazabilidad |
 
-## Solicitudes de reserva
+## Reservas automáticas
 
-El primer flujo comercial no cobra ni emite. Registra una intención de compra
-que el equipo valida manualmente antes de convertirla en pedido confirmado.
+El flujo comercial bloquea precio y cupos sin aprobación manual. En esta fase
+todavía no captura tarjetas ni emite tickets porque la pasarela de pago no está
+contratada, pero deja preparado el registro transaccional del pago.
 
 1. El cliente abre un producto real de Spree.
-2. El storefront valida contacto, viajeros, fechas, consentimiento y código de
-   asociado opcional.
-3. `/api/reservations` revalida el contrato y llama a la Store API de Spree con
-   la clave publicable.
-4. Spree guarda la solicitud en `rumbo_booking_requests` dentro del mismo
-   PostgreSQL del comercio y vuelve a resolver el producto por su ID público,
-   evitando aceptar nombres de producto inventados por el navegador.
-5. PostgreSQL genera la referencia, bloquea transiciones inválidas y escribe
-   `rumbo_booking_status_history` y `rumbo_audit_events` mediante gatillos.
+2. La Store API vuelve a resolver producto, precio, fechas y capacidad desde
+   Spree; nunca acepta el importe enviado por el navegador como fuente válida.
+3. PostgreSQL bloquea la fila de inventario y comprueba atómicamente que todavía
+   existan cupos para todos los viajeros.
+4. Si hay capacidad, crea una reserva `payment_pending`, un bloqueo de 15
+   minutos y un pago pendiente por el importe exacto. Si no hay capacidad, no
+   crea la reserva ni realiza cobros.
+5. Los gatillos convierten el bloqueo en venta cuando el pago queda `paid`, o
+   liberan los cupos al cancelar o vencer. La transición a `confirmed` exige un
+   pago registrado como completado.
 6. El cliente puede consultar únicamente el estado usando referencia y correo;
    la respuesta pública nunca contiene teléfono ni correo.
 
 La clave de idempotencia evita que un doble toque o reintento cree dos reservas.
-La API administrativa de Spree expone lectura y cambio de estado únicamente con
-una clave secreta de administración.
+Las ofertas demostrativas o sin `rumbo.capacity` no se pueden reservar.
 
 ## Modelo de comisión
 
@@ -60,7 +61,7 @@ La comisión es de un único nivel y comienza en 6%, configurable por asociado.
 
 1. El cliente llega con un `referral_code`.
 2. Al generar el pedido se registra una atribución única.
-3. El administrador confirma el pago.
+3. La pasarela confirma el pago mediante un evento autenticado.
 4. Se calcula la comisión sobre el importe válido.
 5. El administrador la aprueba y posteriormente la marca como pagada.
 6. Toda modificación genera un evento de auditoría.
@@ -85,7 +86,8 @@ expone en la Store API. El mapeo y los formatos están versionados en
 [`SPREE_CATALOG_CONTRACT.md`](SPREE_CATALOG_CONTRACT.md).
 
 El endpoint `/api/catalog` puede leer productos de la Store API v3.
-`/api/reservations` registra y consulta solicitudes persistentes.
+`/api/availability` consulta precio y cupos vigentes.
+`/api/reservations` registra y consulta reservas persistentes.
 `/api/airports` encapsula el servicio Name Suggestion de AirLabs.
 `/api/packages` encapsula la búsqueda B2B de PriceTravel. Si las variables de
 conexión todavía no existen, los tres endpoints devuelven datos demostrativos
@@ -103,9 +105,10 @@ Quedan fuera de esta fase:
 - aplicación móvil nativa;
 - pasarela de pago automática no contratada.
 
-La búsqueda de aeropuertos y la capa de paquetes ya quedan preparadas, pero las
-reservas y excepciones se validan manualmente hasta certificar PriceTravel de
-extremo a extremo con credenciales comerciales.
+La búsqueda de aeropuertos y la capa de paquetes ya quedan preparadas. Las
+ofertas propias de Spree bloquean cupos automáticamente; los proveedores
+externos solo podrán venderse automáticamente cuando sus APIs permitan
+revalidar y bloquear inventario de extremo a extremo.
 
 ## Preparación del entorno
 

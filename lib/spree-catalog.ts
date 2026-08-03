@@ -4,6 +4,8 @@ import {
 } from "./travel-packages.ts";
 
 type SpreePrice = {
+  amount?: string | number | null;
+  currency?: string | null;
   display_amount?: string | null;
   display_compare_at_amount?: string | null;
 };
@@ -48,7 +50,7 @@ export type CatalogResult = {
 };
 
 const FALLBACK_MESSAGE =
-  "Catálogo demostrativo: las tarifas deben confirmarse antes de cobrar.";
+  "Modo demostración: estas referencias no admiten reservas ni cobros.";
 
 export const RUMBO_PRODUCT_FIELD_KEYS = {
   country: "rumbo.country",
@@ -56,6 +58,9 @@ export const RUMBO_PRODUCT_FIELD_KEYS = {
   included: "rumbo.included",
   rating: "rumbo.rating",
   reviews: "rumbo.reviews",
+  departureDate: "rumbo.departure_date",
+  returnDate: "rumbo.return_date",
+  capacity: "rumbo.capacity",
 } as const;
 
 type UnknownRecord = Record<string, unknown>;
@@ -88,12 +93,54 @@ function parsePrice(value: unknown, context: string): SpreePrice | undefined {
   const source = record(value);
   if (!source) throw new Error(`${context} debe ser un objeto`);
 
+  const amount = source.amount;
+  if (
+    amount !== undefined &&
+    amount !== null &&
+    typeof amount !== "string" &&
+    typeof amount !== "number"
+  ) {
+    throw new Error(`${context}.amount debe ser un número o texto numérico`);
+  }
+
   return {
+    amount,
+    currency: optionalString(source.currency),
     display_amount: optionalString(source.display_amount),
     display_compare_at_amount: optionalString(
       source.display_compare_at_amount,
     ),
   };
+}
+
+function numericField(product: SpreeProduct, name: string): number | undefined {
+  const value = field(product, name);
+  if (!value) return undefined;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function numericPrice(price: SpreePrice | undefined): number | undefined {
+  if (typeof price?.amount === "number" && Number.isFinite(price.amount)) {
+    return price.amount;
+  }
+  if (typeof price?.amount === "string" && price.amount.trim()) {
+    const parsed = Number(price.amount);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function priceCurrency(price: SpreePrice | undefined): string | undefined {
+  const explicit = price?.currency?.trim().toUpperCase();
+  if (explicit && /^[A-Z]{3}$/.test(explicit)) return explicit;
+
+  const display = price?.display_amount ?? "";
+  if (/US\$|\bUSD\b/i.test(display)) return "USD";
+  if (/S\/|\bPEN\b/i.test(display)) return "PEN";
+  if (/€|\bEUR\b/i.test(display)) return "EUR";
+  return undefined;
 }
 
 function parseCustomField(value: unknown, context: string): SpreeCustomField {
@@ -321,6 +368,7 @@ export function mapSpreeProduct(
   spreeBaseUrl?: string,
 ): TravelPackage {
   const fallback = demoTravelPackages[index % demoTravelPackages.length];
+  const capacity = numericField(product, RUMBO_PRODUCT_FIELD_KEYS.capacity);
 
   return {
     id: product.slug || product.id,
@@ -346,6 +394,12 @@ export function mapSpreeProduct(
         "Itinerario por confirmar",
         "Asesoría de viaje",
       ],
+    capacity,
+    departureDate: field(product, RUMBO_PRODUCT_FIELD_KEYS.departureDate),
+    returnDate: field(product, RUMBO_PRODUCT_FIELD_KEYS.returnDate),
+    priceAmount: numericPrice(product.price),
+    currency: priceCurrency(product.price),
+    bookable: typeof capacity === "number" && capacity > 0,
     variantId: product.default_variant_id,
     provider: "Spree",
     providerReference: product.id,
@@ -395,7 +449,8 @@ export async function getTravelCatalog(): Promise<CatalogResult> {
     return {
       mode: "live",
       packages,
-      message: "Catálogo sincronizado con el backoffice de Rumbo.",
+      message:
+        "Ofertas sincronizadas con precio y cupos controlados por el backoffice de Rumbo.",
     };
   } catch {
     return {

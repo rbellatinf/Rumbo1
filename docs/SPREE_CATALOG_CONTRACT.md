@@ -22,6 +22,8 @@ nombres informales o de la estructura interna de las tablas de PostgreSQL.
 | `name` | `destination` |
 | `thumbnail_url` | `image` |
 | `price.display_amount` | `price` |
+| `price.amount` | `priceAmount` |
+| `price.currency` | `currency` |
 | `original_price.display_amount` | `previousPrice` |
 | `tags[0]` | `tag` |
 | `default_variant_id` | `variantId` |
@@ -30,6 +32,9 @@ nombres informales o de la estructura interna de las tablas de PostgreSQL.
 | `rumbo.included` | `included` |
 | `rumbo.rating` | `rating` |
 | `rumbo.reviews` | `reviews` |
+| `rumbo.departure_date` | `departureDate` |
+| `rumbo.return_date` | `returnDate` |
+| `rumbo.capacity` | `capacity` y `bookable` |
 
 ## Metafields canónicos
 
@@ -47,12 +52,16 @@ sean públicas para la Store API (`display_on=both`).
 | `rumbo.departure_date` | Texto corto | Fecha ISO `AAAA-MM-DD` |
 | `rumbo.return_date` | Texto corto | Fecha ISO `AAAA-MM-DD` |
 | `rumbo.conditions` | Texto largo | Condiciones comerciales |
-| `rumbo.capacity` | Número | Cupos disponibles |
+| `rumbo.capacity` | Número | Cupos totales contratados |
 | `rumbo.cancellation_policy` | Texto largo | Política aplicable |
 
 Spree devuelve cada metafield con las propiedades `key`, `label`, `type` y
 `value`. El adaptador utiliza `key`; `label` es solamente el texto visible en
 el administrador.
+
+El valor `rumbo.capacity` define el inventario total. Los cupos temporales y
+vendidos se descuentan en PostgreSQL; no se modifica manualmente este metafield
+por cada reserva.
 
 ## Importación masiva
 

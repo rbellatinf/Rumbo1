@@ -11,6 +11,7 @@ module Rumbo
       price_display: [:string, nullable: true],
       provider: :string,
       provider_reference: [:string, nullable: true],
+      inventory_id: [:string, nullable: true],
       version: :number
     )
 
@@ -23,6 +24,7 @@ module Rumbo
       :price_display,
       :provider,
       :provider_reference,
+      :inventory_id,
       :version
     )
   end
