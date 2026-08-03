@@ -91,11 +91,12 @@ test("rejects invalid contact, dates, consent, and honeypot values", () => {
   );
 });
 
-test("parses the public Spree booking response without exposing PII", () => {
+test("parses a server-authoritative price hold without exposing PII", () => {
   const booking = parseBookingRecord({
     id: "RUM-20260803-A1B2C3",
     reference: "RUM-20260803-A1B2C3",
-    status: "new",
+    status: "held",
+    payment_status: "not_started",
     product_name: "Paquete Panamá 5 días / 4 noches",
     country: "Panamá",
     departure_date: "2026-09-14",
@@ -103,12 +104,52 @@ test("parses the public Spree booking response without exposing PII", () => {
     adults: 2,
     children: 1,
     contact_channel: "whatsapp",
+    price_per_person: "699.00",
+    price_total: "2097.00",
+    currency: "USD",
+    hold_expires_at: "2026-08-03T20:15:00Z",
+    hold_active: true,
     created_at: "2026-08-03T20:00:00Z",
     updated_at: "2026-08-03T20:00:00Z",
     contact_email: "must-not-be-read@example.com",
   });
 
   assert.equal(booking.reference, "RUM-20260803-A1B2C3");
-  assert.equal(booking.status, "new");
+  assert.equal(booking.status, "held");
+  assert.equal(booking.payment_status, "not_started");
+  assert.equal(booking.price_total, "2097.00");
+  assert.equal(booking.hold_active, true);
   assert.equal("contact_email" in booking, false);
+});
+
+test("keeps compatibility with booking records created before payment holds", () => {
+  const booking = parseBookingRecord({
+    reference: "RUM-20260803-D4E5F6",
+    status: "new",
+    product_name: "Paquete Panamá",
+    adults: 1,
+    children: 0,
+    contact_channel: "email",
+    created_at: "2026-08-03T20:00:00Z",
+    updated_at: "2026-08-03T20:00:00Z",
+  });
+
+  assert.equal(booking.payment_status, "not_started");
+  assert.equal(booking.hold_active, false);
+});
+
+test("rejects incomplete hold terms", () => {
+  assert.throws(() =>
+    parseBookingRecord({
+      reference: "RUM-20260803-ABCDEF",
+      status: "held",
+      payment_status: "not_started",
+      product_name: "Paquete Panamá",
+      adults: 2,
+      children: 0,
+      contact_channel: "whatsapp",
+      created_at: "2026-08-03T20:00:00Z",
+      updated_at: "2026-08-03T20:00:00Z",
+    }),
+  );
 });
