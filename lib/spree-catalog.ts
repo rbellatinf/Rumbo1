@@ -348,6 +348,7 @@ export function mapSpreeProduct(
       ],
     variantId: product.default_variant_id,
     provider: "Spree",
+    providerReference: product.id,
   };
 }
 
