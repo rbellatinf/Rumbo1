@@ -9,6 +9,11 @@ The repository contains a Render Blueprint at `/render.yaml`. It provisions:
 Render generates and stores `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY_BASE`, and
 the Mission Control password. Do not add these values to GitHub.
 
+At runtime, the Spree start script reads Render's `RENDER_EXTERNAL_HOSTNAME`
+and configures Rails and Active Storage with the public HTTPS hostname. This is
+required so Store API image URLs point to the deployed service instead of
+`localhost`.
+
 ## First deployment
 
 1. Merge the pull request that adds this configuration into `main`.
