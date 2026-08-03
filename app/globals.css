@@ -1186,6 +1186,11 @@ label.search-field {
   width: 100%;
 }
 
+.booking-primary:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .booking-back {
   margin: 16px 0;
   border: 0;
@@ -1212,6 +1217,7 @@ label.search-field {
 
 .traveller-fields {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin: 26px 0;
 }
@@ -1224,7 +1230,10 @@ label.search-field {
   font-weight: 650;
 }
 
-.traveller-fields input {
+.traveller-fields input,
+.traveller-fields select,
+.traveller-fields textarea {
+  width: 100%;
   min-height: 48px;
   padding: 0 14px;
   border: 1px solid var(--line);
@@ -1234,9 +1243,64 @@ label.search-field {
   outline: 0;
 }
 
-.traveller-fields input:focus {
+.traveller-fields textarea {
+  min-height: 88px;
+  padding-block: 12px;
+  resize: vertical;
+}
+
+.traveller-fields input:focus,
+.traveller-fields select:focus,
+.traveller-fields textarea:focus {
   border-color: var(--coral);
   box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.12);
+}
+
+.traveller-field-wide {
+  grid-column: 1 / -1;
+}
+
+.booking-consent {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  margin: 0 0 18px;
+  color: var(--slate);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.booking-consent input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--coral);
+}
+
+.booking-error {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 11px;
+  background: #fff1f2;
+  color: #9f1239 !important;
+  font-size: 13px;
+  text-align: left !important;
+}
+
+.booking-honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.booking-confirmation a {
+  color: var(--navy);
+  font-weight: 750;
 }
 
 .booking-reference {
@@ -1263,7 +1327,9 @@ label.search-field {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid #ffd0c5;
   outline-offset: 3px;
 }
@@ -1541,6 +1607,14 @@ input:focus-visible {
 
   .booking-step {
     padding: 54px 24px 32px;
+  }
+
+  .traveller-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .traveller-field-wide {
+    grid-column: auto;
   }
 }
 
