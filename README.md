@@ -9,6 +9,7 @@ licencias, enlaces de referido y comisión directa.
 - detalle y reserva automática con bloqueo temporal de precio y cupos;
 - consulta de estado mediante referencia y correo del viajero;
 - handoff firmado hacia una pasarela alojada y webhook de pago idempotente;
+- checkout Izipay con `formToken`, formulario Krypton V4, retorno e IPN firmados;
 - portal demostrativo del asociado;
 - backoffice demostrativo;
 - adaptador para el catálogo de Spree Store API v3;
@@ -20,9 +21,8 @@ licencias, enlaces de referido y comisión directa.
 - entorno reproducible con Spree Commerce 5.4 y PostgreSQL 18.
 
 Mientras el backend no esté configurado, las tarifas aparecen claramente como
-demostrativas y no se generan cobros ni tickets. La capa de pagos no realiza
-cargos por sí sola: necesita un adaptador para la API oficial de la pasarela
-seleccionada.
+demostrativas y no se generan cobros ni tickets. El checkout Izipay requiere las
+claves API REST, clave pública y clave HMAC de una tienda Izipay propia de Rumbo.
 
 Los conectores externos nunca envían secretos al navegador. Sin las
 credenciales de sandbox, AirLabs usa una lista local de respaldo y
@@ -68,3 +68,6 @@ El contrato exacto de campos entre Spree y el storefront está en
 
 El handoff, la firma y el webhook normalizado de pagos están en
 [`docs/PAYMENT_GATEWAY_CONTRACT.md`](docs/PAYMENT_GATEWAY_CONTRACT.md).
+
+La configuración específica de Izipay, sus variables y pruebas está en
+[`docs/IZIPAY_INTEGRATION.md`](docs/IZIPAY_INTEGRATION.md).

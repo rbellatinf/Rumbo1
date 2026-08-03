@@ -1,0 +1,45 @@
+import { NextRequest, NextResponse } from "next/server";
+import { processIzipayCallback } from "../../../../../lib/izipay";
+
+export const dynamic = "force-dynamic";
+
+function formValue(form: FormData, ...names: string[]): string {
+  for (const name of names) {
+    const value = form.get(name);
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function resultUrl(request: NextRequest, status: string, reference?: string) {
+  const url = new URL("/pago/resultado", request.url);
+  url.searchParams.set("status", status);
+  if (reference) url.searchParams.set("reference", reference);
+  return url;
+}
+
+export async function POST(request: NextRequest) {
+  let reference = "";
+
+  try {
+    const form = await request.formData();
+    const answerRaw = formValue(form, "kr-answer", "kr_answer");
+    const hash = formValue(form, "kr-hash", "kr_hash");
+    if (!answerRaw || !hash) {
+      return NextResponse.redirect(resultUrl(request, "review"), 303);
+    }
+
+    const event = await processIzipayCallback(answerRaw, hash);
+    reference = event.booking_reference;
+    const status =
+      event.status === "paid"
+        ? "paid"
+        : event.status === "failed" || event.status === "cancelled"
+          ? "failed"
+          : "pending";
+
+    return NextResponse.redirect(resultUrl(request, status, reference), 303);
+  } catch {
+    return NextResponse.redirect(resultUrl(request, "review", reference), 303);
+  }
+}
