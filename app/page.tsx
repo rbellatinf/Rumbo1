@@ -32,6 +32,7 @@ import type {
   AirportOption,
   AirportSearchResult,
 } from "../lib/airlabs-airports";
+import type { BookingRecord, ContactChannel } from "../lib/booking-requests";
 import {
   demoTravelPackages,
   type TravelPackage,
@@ -42,6 +43,27 @@ const products = [
   { id: "hotels", label: "Hoteles", icon: Building2 },
   { id: "packages", label: "Paquetes", icon: Package },
 ] as const;
+
+function createIdempotencyKey() {
+  if (typeof window.crypto?.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (typeof window.crypto?.getRandomValues === "function") {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
 
 const trustItems = [
   {
@@ -234,7 +256,19 @@ export default function Home() {
   const [bookingStep, setBookingStep] = useState<0 | 1 | 2 | 3>(0);
   const [travellerName, setTravellerName] = useState("");
   const [travellerEmail, setTravellerEmail] = useState("");
+  const [travellerPhone, setTravellerPhone] = useState("");
+  const [contactChannel, setContactChannel] =
+    useState<ContactChannel>("whatsapp");
+  const [adultCount, setAdultCount] = useState(2);
+  const [childCount, setChildCount] = useState(0);
   const [referralCode, setReferralCode] = useState("");
+  const [bookingNotes, setBookingNotes] = useState("");
+  const [privacyConsent, setPrivacyConsent] = useState(false);
+  const [bookingWebsite, setBookingWebsite] = useState("");
+  const [bookingIdempotencyKey, setBookingIdempotencyKey] = useState("");
+  const [bookingError, setBookingError] = useState("");
+  const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
+  const [bookingResult, setBookingResult] = useState<BookingRecord | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -338,7 +372,95 @@ export default function Home() {
     setBookingStep(0);
     setTravellerName("");
     setTravellerEmail("");
+    setTravellerPhone("");
+    setContactChannel("whatsapp");
+    setAdultCount(2);
+    setChildCount(0);
     setReferralCode("");
+    setBookingNotes("");
+    setPrivacyConsent(false);
+    setBookingWebsite("");
+    setBookingIdempotencyKey("");
+    setBookingError("");
+    setIsSubmittingBooking(false);
+    setBookingResult(null);
+  };
+
+  const openDeal = (deal: TravelPackage) => {
+    setSelectedDeal(deal);
+    setBookingIdempotencyKey(createIdempotencyKey());
+    setBookingError("");
+    setBookingResult(null);
+  };
+
+  const submitBooking = async () => {
+    if (!selectedDeal) return;
+
+    setBookingError("");
+    setIsSubmittingBooking(true);
+
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: bookingIdempotencyKey,
+          product: {
+            id: selectedDeal.providerReference ?? selectedDeal.id,
+            variantId: selectedDeal.variantId,
+            slug: selectedDeal.id,
+            name: selectedDeal.destination,
+            provider: selectedDeal.provider,
+            providerReference: selectedDeal.providerReference,
+            country: selectedDeal.country,
+            price: selectedDeal.price,
+            image: selectedDeal.image,
+            duration: selectedDeal.duration,
+            tag: selectedDeal.tag,
+            included: selectedDeal.included,
+          },
+          trip: {
+            originIata: hasSearched ? originCode : undefined,
+            destinationIata: hasSearched ? destinationCode : undefined,
+            departureDate,
+            returnDate,
+            adults: adultCount,
+            children: childCount,
+          },
+          contact: {
+            fullName: travellerName,
+            email: travellerEmail,
+            phone: travellerPhone,
+            channel: contactChannel,
+          },
+          referralCode,
+          notes: bookingNotes,
+          consent: privacyConsent,
+          website: bookingWebsite,
+        }),
+      });
+      const result = (await response.json()) as {
+        booking?: BookingRecord;
+        message?: string;
+      };
+
+      if (!response.ok || !result.booking) {
+        throw new Error(
+          result.message || "No pudimos registrar la solicitud.",
+        );
+      }
+
+      setBookingResult(result.booking);
+      setBookingStep(3);
+    } catch (error) {
+      setBookingError(
+        error instanceof Error
+          ? error.message
+          : "No pudimos registrar la solicitud.",
+      );
+    } finally {
+      setIsSubmittingBooking(false);
+    }
   };
 
   return (
@@ -628,7 +750,7 @@ export default function Home() {
                     <small>por persona</small>
                   </div>
                   <button
-                    onClick={() => setSelectedDeal(deal)}
+                    onClick={() => openDeal(deal)}
                     type="button"
                   >
                     Ver viaje
@@ -664,6 +786,7 @@ export default function Home() {
         <p>Viajes simples, experiencias enormes.</p>
         <nav aria-label="Enlaces del pie de página">
           <a href="/panel">Portal de asociados</a>
+          <a href="/reservas">Consultar solicitud</a>
           <a href="#ayuda">Ayuda</a>
           <a href="#condiciones">Condiciones</a>
           <a href="#privacidad">Privacidad</a>
@@ -745,8 +868,8 @@ export default function Home() {
                 <p className="section-kicker">Reserva segura</p>
                 <h2>Revisa tu viaje</h2>
                 <p>
-                  Estás reservando <strong>{selectedDeal.destination}</strong>{" "}
-                  para 2 personas.
+                  Estás solicitando <strong>{selectedDeal.destination}</strong>.
+                  Antes de cobrar, Rumbo confirmará disponibilidad y tarifa.
                 </p>
                 <div className="booking-summary">
                   <span>Paquete</span>
@@ -780,7 +903,7 @@ export default function Home() {
                 className="booking-step traveller-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  setBookingStep(3);
+                  void submitBooking();
                 }}
               >
                 <p className="section-kicker">Solicitud de reserva</p>
@@ -813,6 +936,73 @@ export default function Home() {
                     />
                   </label>
                   <label>
+                    <span>Teléfono o WhatsApp</span>
+                    <input
+                      autoComplete="tel"
+                      inputMode="tel"
+                      onChange={(event) => setTravellerPhone(event.target.value)}
+                      placeholder="+51 999 999 999"
+                      required
+                      type="tel"
+                      value={travellerPhone}
+                    />
+                  </label>
+                  <label>
+                    <span>Canal de contacto</span>
+                    <select
+                      onChange={(event) =>
+                        setContactChannel(event.target.value as ContactChannel)
+                      }
+                      value={contactChannel}
+                    >
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="phone">Llamada</option>
+                      <option value="email">Correo</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Fecha de salida preferida</span>
+                    <input
+                      min={dateFromNow(1)}
+                      onChange={(event) => setDepartureDate(event.target.value)}
+                      required
+                      type="date"
+                      value={departureDate}
+                    />
+                  </label>
+                  <label>
+                    <span>Fecha de regreso preferida</span>
+                    <input
+                      min={departureDate}
+                      onChange={(event) => setReturnDate(event.target.value)}
+                      required
+                      type="date"
+                      value={returnDate}
+                    />
+                  </label>
+                  <label>
+                    <span>Adultos</span>
+                    <input
+                      max="9"
+                      min="1"
+                      onChange={(event) => setAdultCount(Number(event.target.value))}
+                      required
+                      type="number"
+                      value={adultCount}
+                    />
+                  </label>
+                  <label>
+                    <span>Niños</span>
+                    <input
+                      max="9"
+                      min="0"
+                      onChange={(event) => setChildCount(Number(event.target.value))}
+                      required
+                      type="number"
+                      value={childCount}
+                    />
+                  </label>
+                  <label>
                     <span>Código de asociado (opcional)</span>
                     <input
                       autoCapitalize="characters"
@@ -823,11 +1013,58 @@ export default function Home() {
                       value={referralCode}
                     />
                   </label>
+                  <label className="traveller-field-wide">
+                    <span>Comentarios (opcional)</span>
+                    <textarea
+                      maxLength={1500}
+                      onChange={(event) => setBookingNotes(event.target.value)}
+                      placeholder="Habitaciones, edades de los niños o alguna necesidad especial"
+                      rows={3}
+                      value={bookingNotes}
+                    />
+                  </label>
                 </div>
 
-                <button className="booking-primary" type="submit">
-                  Enviar solicitud
-                  <ArrowRight aria-hidden="true" />
+                <label className="booking-honeypot" aria-hidden="true">
+                  Sitio web
+                  <input
+                    autoComplete="off"
+                    onChange={(event) => setBookingWebsite(event.target.value)}
+                    tabIndex={-1}
+                    value={bookingWebsite}
+                  />
+                </label>
+
+                <label className="booking-consent">
+                  <input
+                    checked={privacyConsent}
+                    onChange={(event) => setPrivacyConsent(event.target.checked)}
+                    required
+                    type="checkbox"
+                  />
+                  <span>
+                    Acepto que Rumbo use estos datos para validar y contactarme
+                    sobre esta solicitud. No se realizará ningún cobro ahora.
+                  </span>
+                </label>
+
+                {bookingError ? (
+                  <p className="booking-error" role="alert">
+                    {bookingError}
+                  </p>
+                ) : null}
+
+                <button
+                  className="booking-primary"
+                  disabled={isSubmittingBooking}
+                  type="submit"
+                >
+                  {isSubmittingBooking ? "Registrando…" : "Enviar solicitud"}
+                  {isSubmittingBooking ? (
+                    <LoaderCircle aria-hidden="true" className="button-loader" />
+                  ) : (
+                    <ArrowRight aria-hidden="true" />
+                  )}
                 </button>
                 <button
                   className="booking-back"
@@ -845,16 +1082,16 @@ export default function Home() {
                 <span className="booking-icon">
                   <Check aria-hidden="true" />
                 </span>
-                <p className="section-kicker">Solicitud preparada</p>
-                <h2>Listo para validación</h2>
+                <p className="section-kicker">Solicitud registrada</p>
+                <h2>Ya está en manos de Rumbo</h2>
                 <p>
                   La solicitud de <strong>{travellerName}</strong> para{" "}
-                  <strong>{selectedDeal.destination}</strong> quedó preparada en
-                  este entorno demostrativo.
+                  <strong>{selectedDeal.destination}</strong> fue guardada y
+                  pasará por validación de disponibilidad y tarifa.
                 </p>
                 <div className="booking-reference">
                   <span>Referencia</span>
-                  <strong>RUM-2026-0048</strong>
+                  <strong>{bookingResult?.reference}</strong>
                   <span>Asociado</span>
                   <strong>{referralCode || "Venta directa"}</strong>
                 </div>
@@ -863,8 +1100,8 @@ export default function Home() {
                   <Check aria-hidden="true" />
                 </button>
                 <small>
-                  Al conectar Spree, esta solicitud generará el pedido y la
-                  atribución de comisión automáticamente.
+                  Guarda la referencia. También puedes consultar el estado desde{" "}
+                  <a href="/reservas">Mis solicitudes</a>.
                 </small>
               </div>
             )}

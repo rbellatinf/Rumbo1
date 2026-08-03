@@ -82,6 +82,7 @@ test("maps the Spree 5.4 product contract into a Rumbo package", () => {
     included: ["Hotel con desayuno", "Traslados", "City tour"],
     variantId: "variant_panama",
     provider: "Spree",
+    providerReference: "prod_panama",
   });
 });
 

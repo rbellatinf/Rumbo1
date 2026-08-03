@@ -25,13 +25,16 @@ required so Store API image URLs point to the deployed service instead of
 6. Review the three resources and select **Apply** or **Deploy Blueprint**.
 7. Wait until all resources are green. The first build can take several
    minutes because Render downloads and starts Spree, runs its migrations, and
-   applies `backend/postgres/init/010_rumbo_core.sql`.
+   applies every versioned SQL file under `backend/postgres/init`, including
+   the reservation tables and their audit triggers.
 
 ## Verify the deployment
 
 - Open `https://<your-service>.onrender.com/up`; it should return a healthy
   response.
 - Open `https://<your-service>.onrender.com/admin` to reach Spree Admin.
+- Confirm that `POST /api/v3/store/booking_requests` accepts a valid request
+  with the publishable API key after the booking extension is deployed.
 - Spree's initial development credentials are commonly
   `spree@example.com` / `spree123`. Change them immediately if the image creates
   that account.
