@@ -4,7 +4,9 @@ Spree::Core::Engine.add_routes do
   namespace :api, defaults: { format: "json" } do
     namespace :v3 do
       namespace :store do
-        resources :booking_requests, only: %i[create show]
+        resources :booking_requests, only: %i[create show] do
+          get :availability, on: :collection
+        end
       end
 
       namespace :admin do

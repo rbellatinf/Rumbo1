@@ -82,9 +82,13 @@ export async function POST(request: NextRequest) {
         {
           message:
             upstreamMessage(payload) ||
-            "No pudimos registrar la solicitud. Inténtalo nuevamente.",
+            "No pudimos crear la reserva. Inténtalo nuevamente.",
         },
-        upstream.status >= 400 && upstream.status < 500 ? 422 : 502,
+        upstream.status === 409
+          ? 409
+          : upstream.status >= 400 && upstream.status < 500
+            ? 422
+            : 502,
       );
     }
 
@@ -136,8 +140,8 @@ export async function GET(request: NextRequest) {
         {
           message:
             upstream.status === 404
-              ? "No encontramos una solicitud con esos datos."
-              : upstreamMessage(payload) || "No pudimos consultar la solicitud.",
+              ? "No encontramos una reserva con esos datos."
+              : upstreamMessage(payload) || "No pudimos consultar la reserva.",
         },
         upstream.status === 404 ? 404 : 502,
       );

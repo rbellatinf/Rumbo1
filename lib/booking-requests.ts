@@ -2,6 +2,8 @@ export const BOOKING_STATUSES = [
   "new",
   "validating",
   "quoted",
+  "payment_pending",
+  "payment_failed",
   "confirmed",
   "cancelled",
   "expired",
@@ -57,8 +59,30 @@ export type BookingRecord = {
   adults: number;
   children: number;
   contact_channel: ContactChannel;
+  unit_price_amount?: number | null;
+  total_amount?: number | null;
+  price_display?: string | null;
+  currency?: string | null;
+  remaining_capacity?: number | null;
+  payment_status?: string | null;
+  payment_url?: string | null;
+  hold_expires_at?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type OfferAvailability = {
+  product_id: string;
+  variant_id?: string;
+  departure_date: string;
+  return_date: string;
+  total_capacity: number;
+  remaining_capacity: number;
+  price_amount: number;
+  price_display: string;
+  currency: string;
+  bookable: boolean;
+  hold_minutes: number;
 };
 
 export type BookingApiPayload = {
@@ -122,6 +146,15 @@ function optionalText(value: unknown, maximum: number): string | undefined {
 
 function integer(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function decimal(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function iata(value: unknown): string | undefined {
@@ -305,6 +338,9 @@ export function parseBookingRecord(value: unknown): BookingRecord {
   const adults = integer(source.adults);
   const children = integer(source.children);
   const channel = cleanText(source.contact_channel, 20) as ContactChannel;
+  const unitPriceAmount = decimal(source.unit_price_amount);
+  const totalAmount = decimal(source.total_amount);
+  const remainingCapacity = integer(source.remaining_capacity);
 
   if (
     !reference ||
@@ -330,8 +366,60 @@ export function parseBookingRecord(value: unknown): BookingRecord {
     adults,
     children,
     contact_channel: channel,
+    unit_price_amount: unitPriceAmount,
+    total_amount: totalAmount,
+    price_display: optionalText(source.price_display, 80),
+    currency: optionalText(source.currency, 3),
+    remaining_capacity: remainingCapacity,
+    payment_status: optionalText(source.payment_status, 20),
+    payment_url: optionalText(source.payment_url, 2_000),
+    hold_expires_at: optionalText(source.hold_expires_at, 40),
     created_at: createdAt,
     updated_at: updatedAt,
+  };
+}
+
+export function parseOfferAvailability(value: unknown): OfferAvailability {
+  const source = record(value);
+  if (!source) throw new Error("La disponibilidad de la oferta no es válida.");
+
+  const productId = cleanText(source.product_id, 80);
+  const departureDate = isoDate(source.departure_date);
+  const returnDate = isoDate(source.return_date);
+  const totalCapacity = integer(source.total_capacity);
+  const remainingCapacity = integer(source.remaining_capacity);
+  const priceAmount = decimal(source.price_amount);
+  const priceDisplay = cleanText(source.price_display, 80);
+  const currency = cleanText(source.currency, 3).toUpperCase();
+  const holdMinutes = integer(source.hold_minutes);
+
+  if (
+    !productId ||
+    !departureDate ||
+    !returnDate ||
+    totalCapacity === null ||
+    remainingCapacity === null ||
+    priceAmount === null ||
+    !priceDisplay ||
+    !/^[A-Z]{3}$/.test(currency) ||
+    typeof source.bookable !== "boolean" ||
+    holdMinutes === null
+  ) {
+    throw new Error("La disponibilidad de la oferta cambió de formato.");
+  }
+
+  return {
+    product_id: productId,
+    variant_id: optionalText(source.variant_id, 80),
+    departure_date: departureDate,
+    return_date: returnDate,
+    total_capacity: totalCapacity,
+    remaining_capacity: remainingCapacity,
+    price_amount: priceAmount,
+    price_display: priceDisplay,
+    currency,
+    bookable: source.bookable,
+    hold_minutes: holdMinutes,
   };
 }
 
@@ -339,7 +427,9 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   new: "Recibida",
   validating: "Validando disponibilidad",
   quoted: "Cotización enviada",
+  payment_pending: "Cupo reservado · pago pendiente",
+  payment_failed: "Pago pendiente de reintento",
   confirmed: "Confirmada",
   cancelled: "Cancelada",
-  expired: "Cotización vencida",
+  expired: "Reserva temporal vencida",
 };

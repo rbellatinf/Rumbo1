@@ -4,8 +4,30 @@ module Rumbo
   class BookingRequest < ApplicationRecord
     self.table_name = "rumbo_booking_requests"
 
-    STATUSES = %w[new validating quoted confirmed cancelled expired].freeze
+    STATUSES = %w[
+      new
+      validating
+      quoted
+      payment_pending
+      payment_failed
+      confirmed
+      cancelled
+      expired
+    ].freeze
     CONTACT_CHANNELS = %w[whatsapp phone email].freeze
+
+    belongs_to :inventory,
+               class_name: "Rumbo::OfferInventory",
+               inverse_of: :booking_requests,
+               optional: true
+    has_one :hold,
+            class_name: "Rumbo::BookingHold",
+            inverse_of: :booking_request,
+            dependent: :destroy
+    has_one :payment,
+            class_name: "Rumbo::BookingPayment",
+            inverse_of: :booking_request,
+            dependent: :destroy
 
     validates :reference, presence: true, uniqueness: true
     validates :idempotency_key, presence: true, uniqueness: true
@@ -27,8 +49,24 @@ module Rumbo
 
     scope :for_store, ->(store) { where(spree_store_id: store.id) }
 
+    def self.expire_stale_holds!
+      connection.select_value("SELECT rumbo_expire_stale_booking_holds()")
+    end
+
     def prefixed_id
       reference
+    end
+
+    def remaining_capacity
+      inventory&.remaining_capacity
+    end
+
+    def payment_status
+      payment&.status || "pending"
+    end
+
+    def payment_url
+      payment&.payment_url
     end
 
     private

@@ -6,15 +6,16 @@ licencias, enlaces de referido y comisión directa.
 ## Estado actual
 
 - buscador y catálogo adaptable a celular y escritorio;
-- detalle y flujo de solicitud de reserva persistido en PostgreSQL;
+- detalle y reserva automática con bloqueo temporal de precio y cupos;
 - consulta de estado mediante referencia y correo del viajero;
 - portal demostrativo del asociado;
 - backoffice demostrativo;
 - adaptador para el catálogo de Spree Store API v3;
 - autocompletado mundial de aeropuertos preparado para AirLabs Name Suggestion;
 - buscador de paquetes preparado para el contrato B2B de PriceTravel;
-- PostgreSQL con reservas, historial de estados, asociados, licencias,
-  atribuciones, comisiones y auditoría;
+- PostgreSQL con inventario, bloqueos de cupos, pagos preparados, reservas,
+  historial de estados, asociados, licencias, atribuciones, comisiones y
+  auditoría;
 - entorno reproducible con Spree Commerce 5.4 y PostgreSQL 18.
 
 Mientras el backend no esté configurado, las tarifas aparecen claramente como

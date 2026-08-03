@@ -5,6 +5,7 @@ import {
   BookingValidationError,
   parseBookingInput,
   parseBookingRecord,
+  parseOfferAvailability,
   toBookingApiPayload,
 } from "../lib/booking-requests.ts";
 
@@ -95,7 +96,7 @@ test("parses the public Spree booking response without exposing PII", () => {
   const booking = parseBookingRecord({
     id: "RUM-20260803-A1B2C3",
     reference: "RUM-20260803-A1B2C3",
-    status: "new",
+    status: "payment_pending",
     product_name: "Paquete Panamá 5 días / 4 noches",
     country: "Panamá",
     departure_date: "2026-09-14",
@@ -103,12 +104,42 @@ test("parses the public Spree booking response without exposing PII", () => {
     adults: 2,
     children: 1,
     contact_channel: "whatsapp",
+    unit_price_amount: 699,
+    total_amount: 2097,
+    price_display: "US$ 699",
+    currency: "USD",
+    remaining_capacity: 123,
+    payment_status: "pending",
+    payment_url: null,
+    hold_expires_at: "2026-08-03T20:15:00Z",
     created_at: "2026-08-03T20:00:00Z",
     updated_at: "2026-08-03T20:00:00Z",
     contact_email: "must-not-be-read@example.com",
   });
 
   assert.equal(booking.reference, "RUM-20260803-A1B2C3");
-  assert.equal(booking.status, "new");
+  assert.equal(booking.status, "payment_pending");
+  assert.equal(booking.total_amount, 2097);
+  assert.equal(booking.remaining_capacity, 123);
   assert.equal("contact_email" in booking, false);
+});
+
+test("parses server-verified price and capacity", () => {
+  const availability = parseOfferAvailability({
+    product_id: "prod_panama",
+    variant_id: "variant_panama",
+    departure_date: "2026-09-14",
+    return_date: "2026-09-18",
+    total_capacity: 126,
+    remaining_capacity: 123,
+    price_amount: 699,
+    price_display: "US$ 699",
+    currency: "USD",
+    bookable: true,
+    hold_minutes: 15,
+  });
+
+  assert.equal(availability.bookable, true);
+  assert.equal(availability.remaining_capacity, 123);
+  assert.equal(availability.price_amount, 699);
 });

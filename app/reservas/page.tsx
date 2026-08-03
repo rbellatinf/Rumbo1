@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  Clock3,
+  CreditCard,
   LoaderCircle,
   Mail,
   Search,
@@ -25,6 +27,25 @@ function formatDate(value?: string | null) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function formatMoney(amount?: number | null, currency?: string | null) {
+  if (typeof amount !== "number" || !currency) return "Por confirmar";
+
+  return new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatHoldExpiry(value?: string | null) {
+  if (!value) return "No aplica";
+
+  return new Intl.DateTimeFormat("es-PE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export default function ReservationsPage() {
@@ -52,7 +73,7 @@ export default function ReservationsPage() {
       };
 
       if (!response.ok || !result.booking) {
-        throw new Error(result.message || "No pudimos consultar la solicitud.");
+        throw new Error(result.message || "No pudimos consultar la reserva.");
       }
 
       setBooking(result.booking);
@@ -60,7 +81,7 @@ export default function ReservationsPage() {
       setMessage(
         error instanceof Error
           ? error.message
-          : "No pudimos consultar la solicitud.",
+          : "No pudimos consultar la reserva.",
       );
     } finally {
       setIsLoading(false);
@@ -82,7 +103,7 @@ export default function ReservationsPage() {
       <section className={styles.hero}>
         <div className={styles.copy}>
           <p>Seguimiento de reservas</p>
-          <h1>Consulta tu solicitud</h1>
+          <h1>Consulta tu reserva</h1>
           <span>
             Usa la referencia que recibiste y el correo del viajero principal.
             Mostramos únicamente el estado, sin exponer tus datos personales.
@@ -167,14 +188,52 @@ export default function ReservationsPage() {
                   : ""}
               </dd>
             </div>
+            <div>
+              <dt>Total bloqueado</dt>
+              <dd>
+                <CreditCard aria-hidden="true" />
+                {formatMoney(booking.total_amount, booking.currency)}
+              </dd>
+            </div>
+            <div>
+              <dt>Cupo reservado hasta</dt>
+              <dd>
+                <Clock3 aria-hidden="true" />
+                {formatHoldExpiry(booking.hold_expires_at)}
+              </dd>
+            </div>
           </dl>
           <div className={styles.notice}>
             <ShieldCheck aria-hidden="true" />
-            <p>
-              <strong>Aún no se realizó ningún cobro.</strong>
-              Un asesor confirmará disponibilidad, tarifa y condiciones antes
-              de solicitar el pago.
-            </p>
+            {booking.status === "confirmed" ? (
+              <p>
+                <strong>Reserva confirmada.</strong>
+                El pago fue registrado y los cupos quedaron vendidos.
+              </p>
+            ) : booking.status === "expired" ? (
+              <p>
+                <strong>La reserva temporal venció.</strong>
+                Los cupos fueron liberados automáticamente y puedes iniciar una
+                nueva reserva.
+              </p>
+            ) : booking.status === "cancelled" ? (
+              <p>
+                <strong>La reserva fue cancelada.</strong>
+                Los cupos quedaron liberados y no hay ningún pago pendiente.
+              </p>
+            ) : booking.status === "payment_pending" ||
+              booking.status === "payment_failed" ? (
+              <p>
+                <strong>El precio y los cupos ya están bloqueados.</strong>
+                Falta completar el pago online; no se necesita aprobación manual
+                de Rumbo.
+              </p>
+            ) : (
+              <p>
+                <strong>Reserva anterior en proceso.</strong>
+                El estado vigente se muestra arriba; no se ha registrado un pago.
+              </p>
+            )}
           </div>
         </section>
       ) : (
@@ -182,7 +241,7 @@ export default function ReservationsPage() {
           <ShieldCheck aria-hidden="true" />
           <p>
             La referencia y el correo deben coincidir para proteger la
-            información de la solicitud.
+            información de la reserva.
           </p>
         </section>
       )}

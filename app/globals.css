@@ -826,6 +826,20 @@ label.search-field {
   width: 16px;
 }
 
+.deal-capacity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 0;
+  color: #2f7d62;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.deal-capacity svg {
+  width: 16px;
+}
+
 .deal-content ul,
 .modal-body ul {
   display: grid;
@@ -912,6 +926,13 @@ label.search-field {
 .inspiration-card button:hover {
   transform: translateY(-2px);
   background: var(--coral-dark);
+}
+
+.modal-price button:disabled,
+.modal-price button:disabled:hover {
+  cursor: not-allowed;
+  transform: none;
+  background: #98a2b3;
 }
 
 .inspiration-section {
@@ -1180,6 +1201,20 @@ label.search-field {
 .booking-summary strong {
   color: var(--navy);
   text-align: right;
+}
+
+.booking-availability {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 0;
+  color: #2f7d62;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.booking-availability svg {
+  width: 18px;
 }
 
 .booking-primary {
