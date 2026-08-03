@@ -101,6 +101,34 @@ test("accepts tag objects returned by the live Spree Store API", () => {
   assert.equal(mapSpreeProduct(parsed.data[0], 0).tag, "Oferta");
 });
 
+test("uses expanded Spree media and repairs localhost asset URLs", () => {
+  const payload = structuredClone(spreeProductPayload);
+  payload.data[0].thumbnail_url =
+    "https://localhost:3000/rails/active_storage/thumbnail.jpg";
+  Object.assign(payload.data[0], {
+    media: [
+      {
+        media_type: "image",
+        position: 1,
+        original_url:
+          "https://localhost:3000/rails/active_storage/blobs/panama.jpg",
+      },
+    ],
+  });
+
+  const parsed = parseSpreeProductResponse(payload);
+  const travelPackage = mapSpreeProduct(
+    parsed.data[0],
+    0,
+    "https://rumbo1-spree.onrender.com",
+  );
+
+  assert.equal(
+    travelPackage.image,
+    "https://rumbo1-spree.onrender.com/rails/active_storage/blobs/panama.jpg",
+  );
+});
+
 test("rejects a changed Spree response instead of rendering inconsistent data", () => {
   assert.throws(
     () => parseSpreeProductResponse({ data: [{ id: "missing-fields" }] }),
