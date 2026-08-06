@@ -17,7 +17,7 @@ fi
 # GitHub. The fixed email makes the operation idempotent: the first successful
 # deployment creates it and later restarts leave it unchanged.
 RECOVERY_EMAIL="${SPREE_RECOVERY_ADMIN_EMAIL:-admin-recuperacion@rumbo.pe}"
-RECOVERY_PASSWORD="$(ruby -rsecurerandom -e 'print SecureRandom.base58(24)')"
+RECOVERY_PASSWORD="$(ruby -rsecurerandom -e 'print SecureRandom.alphanumeric(24)')"
 RECOVERY_OUTPUT=""
 RECOVERY_CREATED="false"
 
