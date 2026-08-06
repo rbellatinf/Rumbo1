@@ -14,26 +14,16 @@ fi
 ./bin/rails runner /opt/rumbo/ensure_rumbo_metafields.rb
 
 # Create a one-time recovery administrator without storing its password in
-# GitHub. The fixed email makes the operation idempotent: the first successful
-# deployment creates it and later restarts leave it unchanged.
+# GitHub. The fixed email makes this idempotent: later restarts keep the same
+# account and do not reset its password.
 RECOVERY_EMAIL="${SPREE_RECOVERY_ADMIN_EMAIL:-admin-recuperacion@rumbo.pe}"
 RECOVERY_PASSWORD="$(ruby -rsecurerandom -e 'print SecureRandom.alphanumeric(24)')"
-RECOVERY_OUTPUT=""
-RECOVERY_CREATED="false"
 
-if command -v spree >/dev/null 2>&1; then
-  if RECOVERY_OUTPUT="$(spree user create --email "${RECOVERY_EMAIL}" --password "${RECOVERY_PASSWORD}" 2>&1)"; then
-    RECOVERY_CREATED="true"
-  fi
-elif [[ -x ./bin/spree ]]; then
-  if RECOVERY_OUTPUT="$(./bin/spree user create --email "${RECOVERY_EMAIL}" --password "${RECOVERY_PASSWORD}" 2>&1)"; then
-    RECOVERY_CREATED="true"
-  fi
-elif RECOVERY_OUTPUT="$(bundle exec spree user create --email "${RECOVERY_EMAIL}" --password "${RECOVERY_PASSWORD}" 2>&1)"; then
-  RECOVERY_CREATED="true"
-fi
+if EMAIL="${RECOVERY_EMAIL}" ./bin/rails runner 'exit(Spree.admin_user_class.exists?(email: ENV.fetch("EMAIL")) ? 0 : 1)'; then
+  echo "[Rumbo] El administrador de recuperacion ya existe: ${RECOVERY_EMAIL}"
+else
+  EMAIL="${RECOVERY_EMAIL}" PASSWORD="${RECOVERY_PASSWORD}" ./bin/rails spree:cli:create_admin
 
-if [[ "${RECOVERY_CREATED}" == "true" ]]; then
   cat <<EOF
 
 ============================================================
@@ -45,11 +35,6 @@ Guarda esta contrasena ahora: no volvera a mostrarse.
 ============================================================
 
 EOF
-else
-  echo "[Rumbo] El administrador de recuperacion ya existe o Spree no pudo crearlo."
-  if [[ -n "${RECOVERY_OUTPUT}" ]]; then
-    echo "[Rumbo] Detalle: ${RECOVERY_OUTPUT}"
-  fi
 fi
 
 exec ./bin/rails server -b 0.0.0.0
