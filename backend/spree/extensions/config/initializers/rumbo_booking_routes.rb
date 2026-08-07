@@ -8,6 +8,11 @@ Spree::Core::Engine.add_routes do
           get :availability, on: :collection
           post :payment_session, on: :member
         end
+
+        post "access/register", to: "access#register"
+        post "access/login", to: "access#login"
+        get "access/me", to: "access#me"
+        post "access/logout", to: "access#logout"
         post "payment_webhooks/:provider", to: "payment_webhooks#create"
       end
 
