@@ -49,6 +49,13 @@ module Rumbo
         status: normalized_status,
         provider_payment_id: self.provider_payment_id.presence || provider_payment_id
       )
+
+      if normalized_status == "paid"
+        Rumbo::CommissionAttribution.apply_paid_booking!(booking_request.reload)
+      elsif normalized_status == "refunded"
+        Rumbo::CommissionAttribution.reverse_booking!(booking_request.reload)
+      end
+
       self
     end
   end
