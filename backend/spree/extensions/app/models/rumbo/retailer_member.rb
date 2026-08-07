@@ -3,6 +3,7 @@
 module Rumbo
   class RetailerMember < ApplicationRecord
     self.table_name = "rumbo_retailer_members"
+    self.primary_key = "account_id"
 
     belongs_to :retailer,
                class_name: "Rumbo::Retailer",
