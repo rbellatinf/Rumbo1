@@ -106,17 +106,30 @@ CREATE TABLE IF NOT EXISTS rumbo_commission_rules (
   CHECK (active_until IS NULL OR active_until > active_from)
 );
 
+-- A sale may belong to a partner, a retailer, or a direct Rumbo channel.
 ALTER TABLE rumbo_sale_attributions
+  ALTER COLUMN associate_id DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS booking_request_id uuid REFERENCES rumbo_booking_requests(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS source_channel varchar(20) NOT NULL DEFAULT 'partner'
     CHECK (source_channel IN ('partner', 'retailer', 'direct')),
   ADD COLUMN IF NOT EXISTS retailer_id uuid REFERENCES rumbo_retailers(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS referred_partner_id uuid REFERENCES rumbo_partner_profiles(account_id) ON DELETE SET NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS rumbo_sale_attributions_booking_request_uidx
+  ON rumbo_sale_attributions (booking_request_id)
+  WHERE booking_request_id IS NOT NULL;
+
+-- The original MVP allowed one commission row per sale. A network requires one row per beneficiary.
 ALTER TABLE rumbo_commissions
+  DROP CONSTRAINT IF EXISTS rumbo_commissions_sale_attribution_id_key,
   ADD COLUMN IF NOT EXISTS beneficiary_type varchar(20) NOT NULL DEFAULT 'partner'
     CHECK (beneficiary_type IN ('partner', 'sponsor', 'retailer')),
   ADD COLUMN IF NOT EXISTS beneficiary_id uuid,
   ADD COLUMN IF NOT EXISTS rule_id uuid REFERENCES rumbo_commission_rules(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS rumbo_commissions_sale_beneficiary_uidx
+  ON rumbo_commissions (sale_attribution_id, beneficiary_type, beneficiary_id)
+  WHERE beneficiary_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS rumbo_auth_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
