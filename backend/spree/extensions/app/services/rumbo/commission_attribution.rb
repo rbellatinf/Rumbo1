@@ -6,6 +6,18 @@ module Rumbo
       new(booking).apply!
     end
 
+    def self.reverse_booking!(booking)
+      attribution = Rumbo::SaleAttribution.find_by(booking_request_id: booking.id)
+      return unless attribution
+
+      attribution.update!(payment_status: "refunded")
+      attribution.commissions.where.not(status: %w[rejected reversed]).update_all(
+        status: "reversed",
+        updated_at: Time.current
+      )
+      attribution
+    end
+
     def initialize(booking)
       @booking = booking
     end
