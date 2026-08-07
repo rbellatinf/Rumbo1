@@ -1,0 +1,243 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(460px, 1.1fr);
+  background: #f6f7fb;
+  color: #17223b;
+}
+
+.brandPanel {
+  min-height: 100vh;
+  padding: 42px clamp(28px, 6vw, 84px);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(255,255,255,.22), transparent 30%),
+    linear-gradient(145deg, #113b66, #176c83 58%, #21a4a0);
+  color: white;
+}
+
+.brandPanel::after {
+  content: "";
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  right: -180px;
+  bottom: -160px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 50%;
+  box-shadow: 0 0 0 60px rgba(255,255,255,.05), 0 0 0 120px rgba(255,255,255,.03);
+}
+
+.brand {
+  color: white;
+  text-decoration: none;
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  position: relative;
+  z-index: 1;
+}
+
+.brand span { color: #ffce43; }
+
+.brandContent {
+  max-width: 610px;
+  margin: auto 0;
+  position: relative;
+  z-index: 1;
+}
+
+.eyebrow {
+  margin: 0 0 16px;
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: #ffdc73;
+}
+
+.brandContent h1 {
+  margin: 0;
+  max-width: 590px;
+  font-size: clamp(2.35rem, 5vw, 4.8rem);
+  line-height: .98;
+  letter-spacing: -.055em;
+}
+
+.brandContent > p:not(.eyebrow) {
+  max-width: 560px;
+  margin: 28px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.75;
+  color: rgba(255,255,255,.82);
+}
+
+.benefits {
+  display: grid;
+  gap: 16px;
+  margin-top: 42px;
+}
+
+.benefits div {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: rgba(255,255,255,.92);
+  font-size: .95rem;
+}
+
+.benefits svg { width: 20px; height: 20px; color: #ffdc73; flex: 0 0 auto; }
+
+.formPanel {
+  min-height: 100vh;
+  padding: 38px clamp(24px, 6vw, 92px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.accessSelector {
+  width: min(100%, 620px);
+  margin: 0 auto 18px;
+  padding: 5px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid #dfe4ec;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 8px 28px rgba(30,52,79,.06);
+}
+
+.accessSelector button,
+.modeTabs button {
+  border: 0;
+  background: transparent;
+  color: #647086;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.accessSelector button {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border-radius: 11px;
+}
+
+.accessSelector button svg { width: 19px; height: 19px; }
+.accessSelector .active { background: #163f68; color: white; box-shadow: 0 6px 18px rgba(22,63,104,.22); }
+
+.card {
+  width: min(100%, 620px);
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid #e2e6ed;
+  border-radius: 24px;
+  background: white;
+  box-shadow: 0 24px 70px rgba(24,45,74,.11);
+}
+
+.modeTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid #e5e8ee;
+}
+
+.modeTabs button { padding: 0 8px 15px; }
+.modeTabs .modeActive { color: #153f68; border-bottom: 3px solid #1c8295; }
+
+.heading { margin: 30px 0 24px; }
+.heading h2 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.1rem); letter-spacing: -.035em; }
+.heading p { margin: 9px 0 0; color: #6d7789; line-height: 1.55; }
+
+.form { display: grid; gap: 17px; }
+.form label { display: grid; gap: 8px; font-size: .86rem; font-weight: 750; color: #33415a; }
+.form label > span { color: #8a93a4; font-weight: 500; }
+
+.form input:not([type="checkbox"]) {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #d8dee8;
+  border-radius: 11px;
+  background: #fbfcfe;
+  color: #17223b;
+  font: inherit;
+  outline: none;
+}
+
+.form input:focus { border-color: #208ca0; box-shadow: 0 0 0 3px rgba(32,140,160,.12); background: white; }
+.gridTwo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.passwordField { position: relative; }
+.passwordField input { padding-right: 48px !important; }
+.passwordField button {
+  width: 42px;
+  height: 42px;
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  border: 0;
+  background: transparent;
+  color: #778298;
+  cursor: pointer;
+}
+.passwordField svg { width: 19px; height: 19px; }
+
+.check { display: flex !important; grid-template-columns: none; align-items: flex-start; gap: 10px !important; font-weight: 500 !important; line-height: 1.45; }
+.check input { margin-top: 3px; accent-color: #1c8295; }
+.loginOptions { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.loginOptions a { color: #176d82; font-size: .86rem; font-weight: 700; text-decoration: none; }
+
+.submit {
+  min-height: 52px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #174a75, #1c8798);
+  color: white;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(25,111,137,.24);
+}
+
+.success {
+  padding: 20px;
+  display: flex;
+  gap: 14px;
+  border: 1px solid #bfe2d4;
+  border-radius: 14px;
+  background: #f0fbf6;
+  color: #245c4a;
+}
+.success svg { flex: 0 0 auto; }
+.success p { margin: 6px 0 0; font-size: .9rem; line-height: 1.55; }
+
+.back { width: min(100%, 620px); margin: 18px auto 0; text-align: center; }
+.back a { color: #5f6d82; text-decoration: none; font-size: .9rem; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .page { grid-template-columns: 1fr; }
+  .brandPanel { min-height: auto; padding-bottom: 54px; }
+  .brandContent { margin: 90px 0 0; }
+  .brandContent h1 { font-size: clamp(2.3rem, 10vw, 4rem); }
+  .formPanel { min-height: auto; padding-top: 34px; padding-bottom: 50px; }
+}
+
+@media (max-width: 560px) {
+  .brandPanel { padding: 28px 22px 44px; }
+  .brandContent { margin-top: 72px; }
+  .benefits { margin-top: 30px; }
+  .formPanel { padding: 24px 16px 42px; }
+  .card { padding: 24px 18px; border-radius: 19px; }
+  .gridTwo { grid-template-columns: 1fr; }
+  .accessSelector button { font-size: .83rem; }
+  .loginOptions { align-items: flex-start; }
+}
