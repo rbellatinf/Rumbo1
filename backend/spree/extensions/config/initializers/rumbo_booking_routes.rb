@@ -13,6 +13,7 @@ Spree::Core::Engine.add_routes do
         post "access/login", to: "access#login"
         get "access/me", to: "access#me"
         post "access/logout", to: "access#logout"
+        get "partner_dashboard", to: "partner_dashboard#show"
         get "commission_settings", to: "commission_settings#show"
         patch "commission_settings", to: "commission_settings#update"
         post "payment_webhooks/:provider", to: "payment_webhooks#create"
