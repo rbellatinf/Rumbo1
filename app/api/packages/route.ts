@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 
 const IATA_CODE = /^[A-Z]{3}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const FLEXIBLE_DATE_WINDOW_DAYS = 3;
+const DAY_MS = 86_400_000;
 
 type NativeProduct = {
   id: string;
@@ -70,6 +72,15 @@ function nativePackage(product: NativeProduct): TravelPackage {
   };
 }
 
+function dayDistance(left: string, right: string) {
+  return Math.abs(Date.parse(left) - Date.parse(right)) / DAY_MS;
+}
+
+function itineraryDistance(product: NativeProduct, departureDate: string, returnDate: string) {
+  if (!product.departure_date || !product.return_date) return Number.POSITIVE_INFINITY;
+  return dayDistance(product.departure_date, departureDate) + dayDistance(product.return_date, returnDate);
+}
+
 async function searchNativeCatalog(input: {
   destinationIata: string;
   departureDate: string;
@@ -88,12 +99,21 @@ async function searchNativeCatalog(input: {
     const payload = (await parseJson(response)) as { products?: NativeProduct[] };
     if (!response.ok || !Array.isArray(payload.products)) return null;
 
-    const products = payload.products.filter((product) => {
-      if (product.destination_iata !== input.destinationIata) return false;
-      if (!product.departure_id || !product.departure_date || !product.return_date) return false;
-      if (product.departure_date !== input.departureDate || product.return_date !== input.returnDate) return false;
-      return product.available_capacity == null || product.available_capacity >= input.adults;
-    });
+    const products = payload.products
+      .filter((product) => {
+        if (product.destination_iata !== input.destinationIata) return false;
+        if (!product.departure_id || !product.departure_date || !product.return_date) return false;
+        if (dayDistance(product.departure_date, input.departureDate) > FLEXIBLE_DATE_WINDOW_DAYS) return false;
+        if (dayDistance(product.return_date, input.returnDate) > FLEXIBLE_DATE_WINDOW_DAYS) return false;
+        return product.available_capacity == null || product.available_capacity >= input.adults;
+      })
+      .sort((left, right) => {
+        const dateDifference =
+          itineraryDistance(left, input.departureDate, input.returnDate) -
+          itineraryDistance(right, input.departureDate, input.returnDate);
+        if (dateDifference !== 0) return dateDifference;
+        return Number(left.price_amount || Number.POSITIVE_INFINITY) - Number(right.price_amount || Number.POSITIVE_INFINITY);
+      });
 
     return products.map(nativePackage);
   } catch {
@@ -142,12 +162,17 @@ export async function GET(request: NextRequest) {
   });
 
   if (nativePackages && nativePackages.length > 0) {
+    const exact = nativePackages.some(
+      (item) => item.departureDate === departureDate && item.returnDate === returnDate,
+    );
     return NextResponse.json(
       {
         mode: "live",
         provider: "Rumbo",
         packages: nativePackages,
-        message: `Encontramos ${nativePackages.length} opción${nativePackages.length === 1 ? "" : "es"} propia${nativePackages.length === 1 ? "" : "s"} de Rumbo para ${destinationName}.`,
+        message: exact
+          ? `Encontramos ${nativePackages.length} opción${nativePackages.length === 1 ? "" : "es"} propia${nativePackages.length === 1 ? "" : "s"} de Rumbo para ${destinationName}.`
+          : `No había una salida exacta, pero encontramos ${nativePackages.length} opción${nativePackages.length === 1 ? "" : "es"} propia${nativePackages.length === 1 ? "" : "s"} de Rumbo hasta ±${FLEXIBLE_DATE_WINDOW_DAYS} días de tus fechas.`,
       },
       { headers: { "Cache-Control": "private, max-age=15" } },
     );
@@ -168,7 +193,7 @@ export async function GET(request: NextRequest) {
       ...result,
       message:
         nativePackages !== null
-          ? `No encontramos una salida propia de Rumbo para esas fechas. ${result.message}`
+          ? `No encontramos una salida propia de Rumbo dentro de ±${FLEXIBLE_DATE_WINDOW_DAYS} días. ${result.message}`
           : result.message,
     },
     { headers: { "Cache-Control": "private, max-age=30" } },
