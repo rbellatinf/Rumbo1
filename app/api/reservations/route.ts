@@ -5,12 +5,12 @@ import {
   parseBookingRecord,
   toBookingApiPayload,
 } from "../../../lib/booking-requests";
-import { accessConfiguration, parseJson, providerHeaders } from "../../../lib/rumbo-access";
+import { accessConfiguration, providerHeaders } from "../../../lib/rumbo-access";
 
 export const dynamic = "force-dynamic";
 const REFERRAL_COOKIE = "rumbo_referral";
 
-function configuration() {
+function spreeConfiguration() {
   const apiUrl = process.env.SPREE_API_URL?.replace(/\/$/, "");
   const apiKey = process.env.SPREE_PUBLISHABLE_API_KEY;
   return apiUrl && apiKey ? { apiUrl, apiKey } : null;
@@ -51,9 +51,6 @@ async function validAutomaticReferral(code: string | undefined) {
 }
 
 export async function POST(request: NextRequest) {
-  const provider = configuration();
-  if (!provider) return noStoreJson({ message: "El servicio de reservas todavía no está configurado." }, 503);
-
   let raw: unknown;
   try { raw = await request.json(); }
   catch { return noStoreJson({ message: "El formulario no contiene datos válidos." }, 400); }
@@ -64,21 +61,34 @@ export async function POST(request: NextRequest) {
     if (capturedReferral) source.referralCode = await validAutomaticReferral(capturedReferral);
 
     const booking = parseBookingInput(source);
-    const upstream = await fetch(`${provider.apiUrl}/api/v3/store/booking_requests`, {
+    const apiPayload = toBookingApiPayload(booking);
+    const rumbo = accessConfiguration();
+
+    if (rumbo?.kind === "rumbo" && booking.product.provider === "Rumbo") {
+      const upstream = await fetch(`${rumbo.apiUrl}/api/bookings`, {
+        method: "POST",
+        headers: providerHeaders(rumbo, { json: true }),
+        body: JSON.stringify(apiPayload),
+        cache: "no-store",
+      });
+      const payload = await responsePayload(upstream);
+      if (!upstream.ok) {
+        return noStoreJson({ message: upstreamMessage(payload) || "No pudimos crear la reserva en Rumbo." }, upstream.status === 409 ? 409 : upstream.status >= 400 && upstream.status < 500 ? 422 : 502);
+      }
+      return noStoreJson({ booking: parseBookingRecord(payload) }, upstream.status);
+    }
+
+    const spree = spreeConfiguration();
+    if (!spree) return noStoreJson({ message: "El servicio de reservas todavía no está configurado." }, 503);
+    const upstream = await fetch(`${spree.apiUrl}/api/v3/store/booking_requests`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": booking.idempotencyKey,
-        "X-Spree-API-Key": provider.apiKey,
-      },
-      body: JSON.stringify(toBookingApiPayload(booking)),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": booking.idempotencyKey, "X-Spree-API-Key": spree.apiKey },
+      body: JSON.stringify(apiPayload),
     });
     const payload = await responsePayload(upstream);
-
     if (!upstream.ok) {
       return noStoreJson({ message: upstreamMessage(payload) || "No pudimos crear la reserva. Inténtalo nuevamente." }, upstream.status === 409 ? 409 : upstream.status >= 400 && upstream.status < 500 ? 422 : 502);
     }
-
     return noStoreJson({ booking: parseBookingRecord(payload) }, upstream.status);
   } catch (error) {
     if (error instanceof BookingValidationError) return noStoreJson({ message: error.message, fields: error.fields }, 422);
@@ -87,15 +97,28 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const provider = configuration();
-  if (!provider) return noStoreJson({ message: "El servicio de reservas todavía no está configurado." }, 503);
-
   const reference = request.nextUrl.searchParams.get("reference")?.trim().toUpperCase();
   const email = request.nextUrl.searchParams.get("email")?.trim().toLowerCase();
   if (!reference || !/^RUM-\d{8}-[A-F0-9]{6}$/.test(reference) || !email) return noStoreJson({ message: "Ingresa una referencia y un correo válidos." }, 422);
 
+  const rumbo = accessConfiguration();
+  if (rumbo?.kind === "rumbo") {
+    try {
+      const upstream = await fetch(`${rumbo.apiUrl}/api/bookings/${encodeURIComponent(reference)}?email=${encodeURIComponent(email)}`, {
+        headers: providerHeaders(rumbo), cache: "no-store",
+      });
+      const payload = await responsePayload(upstream);
+      if (upstream.ok) return noStoreJson({ booking: parseBookingRecord(payload) });
+      if (upstream.status !== 404) return noStoreJson({ message: upstreamMessage(payload) || "No pudimos consultar la reserva." }, 502);
+    } catch {
+      // Durante la transición, las reservas históricas pueden seguir en Spree.
+    }
+  }
+
+  const spree = spreeConfiguration();
+  if (!spree) return noStoreJson({ message: "No encontramos una reserva con esos datos." }, 404);
   try {
-    const upstream = await fetch(`${provider.apiUrl}/api/v3/store/booking_requests/${encodeURIComponent(reference)}?email=${encodeURIComponent(email)}`, { headers: { "X-Spree-API-Key": provider.apiKey } });
+    const upstream = await fetch(`${spree.apiUrl}/api/v3/store/booking_requests/${encodeURIComponent(reference)}?email=${encodeURIComponent(email)}`, { headers: { "X-Spree-API-Key": spree.apiKey } });
     const payload = await responsePayload(upstream);
     if (!upstream.ok) return noStoreJson({ message: upstream.status === 404 ? "No encontramos una reserva con esos datos." : upstreamMessage(payload) || "No pudimos consultar la reserva." }, upstream.status === 404 ? 404 : 502);
     return noStoreJson({ booking: parseBookingRecord(payload) });
