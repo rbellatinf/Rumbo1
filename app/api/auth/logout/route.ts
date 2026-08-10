@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import {
   accessConfiguration,
   noStoreJson,
+  providerHeaders,
+  providerUrl,
   RUMBO_SESSION_COOKIE,
 } from "../../../../lib/rumbo-access";
 
@@ -13,16 +15,16 @@ export async function POST(request: NextRequest) {
 
   if (provider && token) {
     try {
-      await fetch(`${provider.apiUrl}/api/v3/store/access/logout`, {
-        method: "POST",
-        headers: {
-          "X-Spree-API-Key": provider.apiKey,
-          Authorization: `Bearer ${token}`,
+      await fetch(
+        providerUrl(provider, "/api/access/logout", "/api/v3/store/access/logout"),
+        {
+          method: "POST",
+          headers: providerHeaders(provider, { token }),
+          cache: "no-store",
         },
-        cache: "no-store",
-      });
+      );
     } catch {
-      // The local cookie is still cleared even if the backend is temporarily unavailable.
+      // Clear the local cookie even if the backend is temporarily unavailable.
     }
   }
 
