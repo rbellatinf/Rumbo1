@@ -39,7 +39,10 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: cd backend/rumbo-api && npm ci
+    # rumbo-api has its own package.json but no package-lock.json yet, so npm ci
+    # cannot run here. npm install is deterministic enough for this MVP deploy
+    # and allows Render to install the API dependencies successfully.
+    buildCommand: cd backend/rumbo-api && npm install --omit=dev
     startCommand: cd backend/rumbo-api && npm run start:real
     healthCheckPath: /health
     autoDeployTrigger: checksPass
