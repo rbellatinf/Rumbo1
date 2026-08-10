@@ -29,6 +29,8 @@ module Rumbo
       partner = Rumbo::PartnerProfile.find_by(referral_code: booking.referral_code)
       return unless partner&.associate_id
 
+      settings = Rumbo::GlobalCommissionSetting.current
+
       attribution = Rumbo::SaleAttribution.find_or_create_by!(booking_request_id: booking.id) do |sale|
         sale.spree_order_id = booking.reference
         sale.associate_id = partner.associate_id
@@ -52,16 +54,16 @@ module Rumbo
         attribution: attribution,
         beneficiary_type: "partner",
         beneficiary_id: partner.account_id,
-        rate: partner.commission_rate
+        rate: settings.partner_rate
       )
 
       sponsor = partner.sponsor
-      if sponsor && partner.network_commission_rate.to_d.positive?
+      if sponsor && settings.sponsor_rate.to_d.positive?
         create_commission!(
           attribution: attribution,
           beneficiary_type: "sponsor",
           beneficiary_id: sponsor.account_id,
-          rate: partner.network_commission_rate
+          rate: settings.sponsor_rate
         )
       end
 
