@@ -63,8 +63,10 @@ export async function POST(request: NextRequest) {
     const booking = parseBookingInput(source);
     const apiPayload = toBookingApiPayload(booking);
     const rumbo = accessConfiguration();
+    const nativeReference = booking.product.id.startsWith("rumbo:") ? booking.product.id.slice(6) : null;
 
-    if (rumbo?.kind === "rumbo" && booking.product.provider === "Rumbo") {
+    if (rumbo?.kind === "rumbo" && nativeReference) {
+      apiPayload.spree_product_id = nativeReference;
       const upstream = await fetch(`${rumbo.apiUrl}/api/bookings`, {
         method: "POST",
         headers: providerHeaders(rumbo, { json: true }),
