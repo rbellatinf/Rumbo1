@@ -1,6 +1,7 @@
 "use client";
 
 import { Building2, CircleDollarSign, LogOut, UsersRound } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import styles from "./agencia.module.css";
 
@@ -50,7 +51,7 @@ export default function AgencyPage() {
   return (
     <main className={styles.page}>
       <aside className={styles.sidebar}>
-        <a className={styles.brand} href="/">rumbo<span>.</span></a>
+        <Link className={styles.brand} href="/">rumbo<span>.</span></Link>
         <p>Agencia minorista</p>
         <nav>
           <a className={styles.active} href="#resumen"><Building2 /> Resumen</a>
