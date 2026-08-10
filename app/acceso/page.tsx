@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import styles from "./acceso.module.css";
 
@@ -105,9 +106,9 @@ export default function AccessPage() {
   return (
     <main className={styles.page}>
       <section className={styles.brandPanel}>
-        <a className={styles.brand} href="/" aria-label="Rumbo, inicio">
+        <Link className={styles.brand} href="/" aria-label="Rumbo, inicio">
           rumbo<span>.</span>
-        </a>
+        </Link>
         <div className={styles.brandContent}>
           <p className={styles.eyebrow}>{copy.eyebrow}</p>
           <h1>{copy.title}</h1>
@@ -202,7 +203,7 @@ export default function AccessPage() {
             </button>
           </form>
         </div>
-        <p className={styles.back}><a href="/">← Volver a rumbo.pe</a></p>
+        <p className={styles.back}><Link href="/">← Volver a rumbo.pe</Link></p>
       </section>
     </main>
   );
