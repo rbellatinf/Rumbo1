@@ -8,6 +8,10 @@ export type AccessProvider = {
   apiKey: string;
 };
 
+export function demoMode() {
+  return /^(1|true|yes)$/i.test(process.env.RUMBO_DEMO_MODE || "");
+}
+
 export function accessConfiguration(): AccessProvider | null {
   const rumboUrl = process.env.RUMBO_API_URL?.replace(/\/$/, "");
   const rumboKey = process.env.RUMBO_API_KEY;
@@ -24,13 +28,14 @@ export function providerUrl(provider: AccessProvider, rumboPath: string, spreePa
 
 export function providerHeaders(
   provider: AccessProvider,
-  options: { token?: string; json?: boolean } = {},
+  options: { token?: string; json?: boolean; demoRole?: "wholesaler_admin" | "partner" | "retailer" } = {},
 ): Record<string, string> {
   const headers: Record<string, string> = {
     [provider.kind === "rumbo" ? "X-Rumbo-API-Key" : "X-Spree-API-Key"]: provider.apiKey,
   };
   if (options.json) headers["Content-Type"] = "application/json";
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  if (provider.kind === "rumbo" && demoMode() && options.demoRole) headers["X-Rumbo-Demo-Role"] = options.demoRole;
   return headers;
 }
 
