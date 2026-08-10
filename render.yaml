@@ -1,6 +1,33 @@
 # Render Blueprint for the Rumbo MVP.
-# This creates one Spree web service, one queue, and one managed PostgreSQL database.
+# Spree remains temporary for catalog while Rumbo API owns the business backoffice.
 services:
+  - type: web
+    name: rumbo-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: cd backend/rumbo-api && npm install
+    startCommand: cd backend/rumbo-api && npm run start:real
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rumbo1-postgres
+          property: connectionString
+      - key: RUMBO_API_KEY
+        generateValue: true
+      - key: RUMBO_DEMO_MODE
+        value: "false"
+      - key: RUMBO_ADMIN_EMAIL
+        sync: false
+      - key: RUMBO_ADMIN_PASSWORD
+        sync: false
+      - key: PGSSLMODE
+        value: require
+      - key: NODE_ENV
+        value: production
+
   - type: web
     name: rumbo1-spree
     runtime: docker
