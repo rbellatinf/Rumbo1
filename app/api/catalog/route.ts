@@ -54,8 +54,8 @@ function toPackage(product: NativeProduct): TravelPackage {
     currency,
     bookable: Boolean(product.departure_id && amount > 0 && (product.available_capacity == null || product.available_capacity > 0)),
     variantId: product.departure_id,
-    provider: "Rumbo",
-    providerReference: product.id,
+    provider: "Spree",
+    providerReference: `rumbo:${product.id}`,
   };
 }
 
