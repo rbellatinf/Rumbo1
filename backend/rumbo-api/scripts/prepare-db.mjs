@@ -12,6 +12,7 @@ if (!process.env.DATABASE_URL) {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrations = [
   "070_rumbo_catalog.sql",
+  "071_rumbo_catalog_search.sql",
   "080_rumbo_native_bookings.sql",
 ];
 const pool = new Pool({
