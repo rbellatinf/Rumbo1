@@ -1,6 +1,35 @@
-# Render Blueprint for the Rumbo MVP.
-# Spree remains temporary for catalog while Rumbo API owns the business backoffice.
+# Render Blueprint for the Rumbo platform.
+# The Next.js storefront is the primary customer/admin web app.
+# Spree remains temporarily as a legacy provider during the migration.
 services:
+  - type: web
+    name: rumbo-storefront
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RUMBO_API_URL
+        fromService:
+          name: rumbo-api
+          type: web
+          property: host
+      - key: RUMBO_API_KEY
+        sync: false
+      - key: RUMBO_DEMO_MODE
+        value: "false"
+      - key: SPREE_API_URL
+        fromService:
+          name: rumbo1-spree
+          type: web
+          property: host
+      - key: SPREE_PUBLISHABLE_API_KEY
+        sync: false
+
   - type: web
     name: rumbo-api
     runtime: node
@@ -16,7 +45,7 @@ services:
           name: rumbo1-postgres
           property: connectionString
       - key: RUMBO_API_KEY
-        generateValue: true
+        sync: false
       - key: RUMBO_DEMO_MODE
         value: "false"
       - key: RUMBO_ADMIN_EMAIL
