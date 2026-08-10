@@ -6,17 +6,25 @@ import {
   Building2,
   Check,
   CircleDollarSign,
+  LoaderCircle,
   Network,
   Save,
   ShieldCheck,
   UserRound,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import styles from "./comisiones.module.css";
 
 type CommissionKey = "partner" | "sponsor" | "retailer";
-
 type CommissionState = Record<CommissionKey, number>;
+
+type CommissionApiPayload = {
+  partner_rate?: number;
+  sponsor_rate?: number;
+  retailer_rate?: number;
+  updated_at?: string;
+  message?: string;
+};
 
 const defaults: CommissionState = {
   partner: 6,
@@ -56,10 +64,52 @@ function clampPercent(value: number) {
   return Math.min(100, Math.max(0, value));
 }
 
+function fromApi(payload: CommissionApiPayload): CommissionState {
+  return {
+    partner: clampPercent((payload.partner_rate ?? 0.06) * 100),
+    sponsor: clampPercent((payload.sponsor_rate ?? 0) * 100),
+    retailer: clampPercent((payload.retailer_rate ?? 0) * 100),
+  };
+}
+
 export default function CommissionSettingsPage() {
   const [values, setValues] = useState<CommissionState>(defaults);
   const [savedValues, setSavedValues] = useState<CommissionState>(defaults);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/commission-settings", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as CommissionApiPayload;
+        if (!response.ok) throw new Error(payload.message || "No pudimos cargar las comisiones.");
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        const loaded = fromApi(payload);
+        setValues(loaded);
+        setSavedValues(loaded);
+        setUpdatedAt(payload.updated_at ?? null);
+        setError("");
+      })
+      .catch((loadError: unknown) => {
+        if (!active) return;
+        setError(loadError instanceof Error ? loadError.message : "No pudimos cargar las comisiones.");
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const changed = useMemo(
     () => Object.keys(values).some((key) => values[key as CommissionKey] !== savedValues[key as CommissionKey]),
@@ -70,12 +120,38 @@ export default function CommissionSettingsPage() {
     const value = rawValue === "" ? 0 : clampPercent(Number(rawValue));
     setValues((current) => ({ ...current, [key]: value }));
     setSaved(false);
+    setError("");
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSavedValues(values);
-    setSaved(true);
+    setIsSaving(true);
+    setSaved(false);
+    setError("");
+
+    try {
+      const response = await fetch("/api/commission-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partner_rate: values.partner / 100,
+          sponsor_rate: values.sponsor / 100,
+          retailer_rate: values.retailer / 100,
+        }),
+      });
+      const payload = (await response.json()) as CommissionApiPayload;
+      if (!response.ok) throw new Error(payload.message || "No pudimos guardar las comisiones.");
+
+      const persisted = fromApi(payload);
+      setValues(persisted);
+      setSavedValues(persisted);
+      setUpdatedAt(payload.updated_at ?? null);
+      setSaved(true);
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : "No pudimos guardar las comisiones.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const totalPotential = values.partner + values.sponsor;
@@ -103,9 +179,11 @@ export default function CommissionSettingsPage() {
           </div>
           <span className={styles.statusBadge}>
             <ShieldCheck aria-hidden="true" />
-            Configuración mayorista
+            PostgreSQL conectado
           </span>
         </div>
+
+        {error ? <p className={styles.errorMessage} role="alert">{error}</p> : null}
 
         <form className={styles.form} onSubmit={submit}>
           <section className={styles.card}>
@@ -113,7 +191,7 @@ export default function CommissionSettingsPage() {
               <div>
                 <h2>Porcentajes generales</h2>
                 <p>
-                  Estos valores funcionan como regla base. Más adelante podremos permitir excepciones por Partner, agencia, campaña o producto.
+                  Estos valores funcionan como regla base y se guardan en PostgreSQL. Los cambios aplican a nuevas comisiones; no recalculan comisiones históricas ya generadas.
                 </p>
               </div>
               <BadgePercent aria-hidden="true" />
@@ -133,6 +211,7 @@ export default function CommissionSettingsPage() {
                   <div className={styles.percentField}>
                     <input
                       aria-label={`${title}, porcentaje`}
+                      disabled={isLoading || isSaving}
                       id={`commission-${key}`}
                       inputMode="decimal"
                       max="100"
@@ -189,10 +268,16 @@ export default function CommissionSettingsPage() {
 
           <div className={styles.actions}>
             <p>
-              {saved ? (
-                <span className={styles.saved}><Check aria-hidden="true" /> Configuración guardada en esta sesión.</span>
+              {isLoading ? (
+                "Cargando configuración desde PostgreSQL…"
+              ) : isSaving ? (
+                "Guardando en PostgreSQL…"
+              ) : saved ? (
+                <span className={styles.saved}><Check aria-hidden="true" /> Configuración guardada en PostgreSQL.</span>
               ) : changed ? (
                 "Tienes cambios sin guardar."
+              ) : updatedAt ? (
+                `Última actualización: ${new Date(updatedAt).toLocaleString("es-PE")}`
               ) : (
                 "No hay cambios pendientes."
               )}
@@ -200,18 +285,19 @@ export default function CommissionSettingsPage() {
             <div>
               <button
                 className={styles.secondary}
-                disabled={!changed}
+                disabled={!changed || isLoading || isSaving}
                 onClick={() => {
                   setValues(savedValues);
                   setSaved(false);
+                  setError("");
                 }}
                 type="button"
               >
                 Descartar
               </button>
-              <button className={styles.primary} disabled={!changed} type="submit">
-                <Save aria-hidden="true" />
-                Guardar cambios
+              <button className={styles.primary} disabled={!changed || isLoading || isSaving} type="submit">
+                {isSaving ? <LoaderCircle aria-hidden="true" className={styles.spinner} /> : <Save aria-hidden="true" />}
+                {isSaving ? "Guardando" : "Guardar cambios"}
               </button>
             </div>
           </div>
