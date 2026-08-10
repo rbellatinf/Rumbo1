@@ -2,10 +2,36 @@ import { NextResponse } from "next/server";
 
 export const RUMBO_SESSION_COOKIE = "rumbo_session";
 
-export function accessConfiguration() {
-  const apiUrl = process.env.SPREE_API_URL?.replace(/\/$/, "");
-  const apiKey = process.env.SPREE_PUBLISHABLE_API_KEY;
-  return apiUrl && apiKey ? { apiUrl, apiKey } : null;
+export type AccessProvider = {
+  kind: "rumbo" | "spree";
+  apiUrl: string;
+  apiKey: string;
+};
+
+export function accessConfiguration(): AccessProvider | null {
+  const rumboUrl = process.env.RUMBO_API_URL?.replace(/\/$/, "");
+  const rumboKey = process.env.RUMBO_API_KEY;
+  if (rumboUrl && rumboKey) return { kind: "rumbo", apiUrl: rumboUrl, apiKey: rumboKey };
+
+  const spreeUrl = process.env.SPREE_API_URL?.replace(/\/$/, "");
+  const spreeKey = process.env.SPREE_PUBLISHABLE_API_KEY;
+  return spreeUrl && spreeKey ? { kind: "spree", apiUrl: spreeUrl, apiKey: spreeKey } : null;
+}
+
+export function providerUrl(provider: AccessProvider, rumboPath: string, spreePath: string) {
+  return `${provider.apiUrl}${provider.kind === "rumbo" ? rumboPath : spreePath}`;
+}
+
+export function providerHeaders(
+  provider: AccessProvider,
+  options: { token?: string; json?: boolean } = {},
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    [provider.kind === "rumbo" ? "X-Rumbo-API-Key" : "X-Spree-API-Key"]: provider.apiKey,
+  };
+  if (options.json) headers["Content-Type"] = "application/json";
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  return headers;
 }
 
 export async function parseJson(response: Response) {
@@ -27,10 +53,7 @@ export function backendMessage(payload: Record<string, unknown>, fallback: strin
 }
 
 export function noStoreJson(payload: unknown, status = 200) {
-  return NextResponse.json(payload, {
-    status,
-    headers: { "Cache-Control": "no-store" },
-  });
+  return NextResponse.json(payload, { status, headers: { "Cache-Control": "no-store" } });
 }
 
 export function sessionCookieOptions(remember = false) {
