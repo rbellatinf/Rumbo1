@@ -5,35 +5,21 @@ import type { TravelPackage } from "../../../lib/travel-packages";
 
 export const dynamic = "force-dynamic";
 
-type NativeProduct = {
-  id: string;
-  slug: string;
-  name: string;
-  country?: string;
-  city?: string;
-  destination_iata?: string;
-  provider?: string;
-  provider_reference?: string;
-  duration_label?: string;
-  tag?: string;
-  included?: string[];
-  departure_id?: string;
-  departure_date?: string;
-  return_date?: string;
-  currency?: string;
-  price_amount?: number;
-  capacity?: number;
-  available_capacity?: number;
-  image_url?: string;
-};
+type NativeDeparture = { id: string; origin_iata?: string | null; departure_date?: string | null; return_date?: string | null; currency?: string; price_amount?: number; capacity?: number | null; available_capacity?: number | null; low_stock_threshold?: number | null; };
+type NativeProduct = { id: string; slug: string; name: string; country?: string; city?: string; duration_label?: string; tag?: string; included?: string[]; image_url?: string; from_price_amount?: number; active_departure_count?: number; departures?: NativeDeparture[]; };
 
-function money(amount: number, currency: string) {
-  return new Intl.NumberFormat("es-PE", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
-}
+function money(amount: number, currency: string) { return new Intl.NumberFormat("es-PE", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount); }
 
 function toPackage(product: NativeProduct): TravelPackage {
-  const amount = Number(product.price_amount || 0);
-  const currency = product.currency || "USD";
+  const departures = Array.isArray(product.departures) ? product.departures : [];
+  const departure = departures[0];
+  const amount = Number(departure?.price_amount || product.from_price_amount || 0);
+  const fromAmount = Number(product.from_price_amount || amount);
+  const currency = departure?.currency || "USD";
+  const remaining = departure?.available_capacity ?? departure?.capacity ?? undefined;
+  const threshold = departure?.low_stock_threshold ?? 5;
+  const lowStock = typeof remaining === "number" && remaining > 0 && remaining <= threshold;
+  const multipleDepartures = Number(product.active_departure_count || 0) > 1;
   return {
     id: product.slug,
     destination: product.name,
@@ -42,20 +28,23 @@ function toPackage(product: NativeProduct): TravelPackage {
     imagePosition: "center",
     duration: product.duration_label || "Consultar duración",
     rating: "Nuevo",
-    reviews: "Rumbo",
-    price: amount > 0 ? money(amount, currency) : "Consultar",
+    reviews: multipleDepartures ? `${product.active_departure_count} salidas` : "Rumbo",
+    price: multipleDepartures && fromAmount > 0 ? `Desde ${money(fromAmount, currency)}` : amount > 0 ? money(amount, currency) : "Consultar",
     previousPrice: "",
-    tag: product.tag || "Rumbo",
+    tag: lowStock ? `Últimos ${remaining} cupos` : product.tag || "Rumbo",
     included: Array.isArray(product.included) ? product.included : [],
-    capacity: product.available_capacity ?? product.capacity,
-    departureDate: product.departure_date,
-    returnDate: product.return_date,
+    capacity: remaining,
+    departureDate: departure?.departure_date || undefined,
+    returnDate: departure?.return_date || undefined,
     priceAmount: amount || undefined,
     currency,
-    bookable: Boolean(product.departure_id && amount > 0 && (product.available_capacity == null || product.available_capacity > 0)),
-    variantId: product.departure_id,
+    bookable: Boolean(departure?.id && amount > 0 && (remaining == null || remaining > 0)),
+    variantId: departure?.id,
     provider: "Spree",
     providerReference: `rumbo:${product.id}`,
+    originIata: departure?.origin_iata || undefined,
+    lowStock,
+    activeDepartureCount: Number(product.active_departure_count || 0),
   };
 }
 
@@ -63,22 +52,15 @@ export async function GET() {
   const provider = accessConfiguration();
   if (provider?.kind === "rumbo") {
     try {
-      const response = await fetch(`${provider.apiUrl}/api/catalog`, {
-        headers: providerHeaders(provider), cache: "no-store",
-      });
+      const response = await fetch(`${provider.apiUrl}/api/catalog`, { headers: providerHeaders(provider), cache: "no-store" });
       const payload = await parseJson(response) as { products?: NativeProduct[] };
       if (response.ok && Array.isArray(payload.products)) {
-        return NextResponse.json({
-          mode: "live",
-          packages: payload.products.map(toPackage),
-          message: "Catálogo propio de Rumbo conectado a PostgreSQL.",
-        }, { headers: { "Cache-Control": "no-store" } });
+        return NextResponse.json({ mode: "live", packages: payload.products.map(toPackage), message: "Catálogo propio de Rumbo conectado a PostgreSQL." }, { headers: { "Cache-Control": "no-store" } });
       }
     } catch {
-      // El catálogo Spree se mantiene como respaldo durante la transición.
+      // Spree se conserva únicamente como respaldo durante la transición.
     }
   }
-
   const catalog = await getTravelCatalog();
   return NextResponse.json(catalog, { headers: { "Cache-Control": "no-store" } });
 }
