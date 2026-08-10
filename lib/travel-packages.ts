@@ -20,6 +20,9 @@ export type TravelPackage = {
   variantId?: string;
   provider?: "Rumbo" | "Spree" | "PriceTravel";
   providerReference?: string;
+  originIata?: string;
+  lowStock?: boolean;
+  activeDepartureCount?: number;
 };
 
 export const demoTravelPackages: TravelPackage[] = [
@@ -37,11 +40,7 @@ export const demoTravelPackages: TravelPackage[] = [
     tag: "Más elegido",
     provider: "Rumbo",
     bookable: false,
-    included: [
-      "Vuelo ida y vuelta",
-      "Hotel con desayuno",
-      "Traslados incluidos",
-    ],
+    included: ["Vuelo ida y vuelta", "Hotel con desayuno", "Traslados incluidos"],
   },
   {
     id: "punta-cana",
@@ -57,11 +56,7 @@ export const demoTravelPackages: TravelPackage[] = [
     tag: "Todo incluido",
     provider: "Rumbo",
     bookable: false,
-    included: [
-      "Vuelo ida y vuelta",
-      "Resort all inclusive",
-      "Traslado al aeropuerto",
-    ],
+    included: ["Vuelo ida y vuelta", "Resort all inclusive", "Traslado al aeropuerto"],
   },
   {
     id: "cartagena",
