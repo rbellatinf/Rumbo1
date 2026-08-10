@@ -7,7 +7,10 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm ci && npm run build
+    # The project build script intentionally verifies that vinext was installed
+    # through install:ci. A plain `npm ci` does not create that verification
+    # marker, so Render must use the same verified installer as CI/Sites.
+    buildCommand: npm run install:ci && npm run build
     startCommand: npm start
     autoDeployTrigger: checksPass
     envVars:
