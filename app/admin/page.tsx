@@ -1,49 +1,49 @@
 "use client";
 
-import { Building2, CircleDollarSign, ClipboardList, LoaderCircle, ShieldCheck, UsersRound } from "lucide-react";
+import { Building2, CircleDollarSign, ClipboardList, LoaderCircle, Plane, Search, ShieldCheck, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import styles from "./admin.module.css";
 
 type AdminPayload = {
-  metrics: { partners: number; partners_pending: number; retailers: number; retailers_pending: number; commissions: number; commissions_pending: number };
+  metrics: { partners: number; partners_pending: number; retailers: number; retailers_pending: number; commissions: number; commissions_pending: number; reservations: number; reservations_open: number };
   partners: Array<{ account_id: string; first_name: string; last_name: string; document_type: string; document_number: string; phone?: string; referral_code: string; email: string; status: string; direct_referrals: number; created_at: string }>;
   retailers: Array<{ id: string; legal_name: string; trade_name: string; tax_id: string; contact_email?: string; phone?: string; status: string; member_count: number; created_at: string }>;
   commissions: Array<{ id: string; beneficiary_type: string; currency: string; base_amount: number; rate: number; commission_amount: number; status: string; reference: string; created_at: string }>;
+  reservations: Array<{ id: string; reference: string; product_name: string; provider: string; origin_iata?: string; destination_iata?: string; departure_date?: string; return_date?: string; adults: number; children: number; currency?: string; price_display?: string; contact_name: string; contact_email: string; contact_phone: string; referral_code?: string; status: string; payment_status: string; created_at: string }>;
   commission_settings: { partner_rate: number; sponsor_rate: number; retailer_rate: number; updated_at?: string };
   audit: Array<{ actor: string; action: string; entity_type: string; entity_id: string; created_at: string }>;
+  demo_mode?: boolean;
 };
 
-type Tab = "summary" | "partners" | "retailers" | "commissions" | "audit";
+type Tab = "summary" | "reservations" | "partners" | "retailers" | "commissions" | "audit";
 
 const money = (amount: number, currency: string) => new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(amount || 0);
 const date = (value: string) => new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const shortDate = (value?: string) => value ? new Intl.DateTimeFormat("es-PE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "—";
 
 export default function AdminPage() {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [tab, setTab] = useState<Tab>("summary");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [search, setSearch] = useState("");
   const [rates, setRates] = useState({ partner: 6, sponsor: 0, retailer: 0 });
 
   async function load() {
     const response = await fetch("/api/admin/overview", { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) window.location.replace("/acceso");
+      if (response.status === 401 || response.status === 403) window.location.replace("/admin/acceso");
       throw new Error(payload.message || "No pudimos cargar el backoffice.");
     }
     setData(payload);
-    setRates({
-      partner: Number(payload.commission_settings?.partner_rate || 0) * 100,
-      sponsor: Number(payload.commission_settings?.sponsor_rate || 0) * 100,
-      retailer: Number(payload.commission_settings?.retailer_rate || 0) * 100,
-    });
+    setRates({ partner: Number(payload.commission_settings?.partner_rate || 0) * 100, sponsor: Number(payload.commission_settings?.sponsor_rate || 0) * 100, retailer: Number(payload.commission_settings?.retailer_rate || 0) * 100 });
   }
 
   useEffect(() => { load().catch((e) => setError(e instanceof Error ? e.message : "Error de carga")); }, []);
 
-  async function changeStatus(type: "partners" | "retailers", id: string, status: string) {
+  async function changeStatus(type: "partners" | "retailers" | "reservations", id: string, status: string) {
     setBusy(`${type}:${id}`); setError("");
     try {
       const response = await fetch(`/api/admin/${type}/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
@@ -65,7 +65,13 @@ export default function AdminPage() {
     finally { setBusy(""); }
   }
 
-  const pendingTotal = useMemo(() => data ? data.metrics.partners_pending + data.metrics.retailers_pending + data.metrics.commissions_pending : 0, [data]);
+  const pendingTotal = useMemo(() => data ? data.metrics.partners_pending + data.metrics.retailers_pending + data.metrics.commissions_pending + data.metrics.reservations_open : 0, [data]);
+  const filteredReservations = useMemo(() => {
+    if (!data) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return data.reservations;
+    return data.reservations.filter((r) => [r.reference, r.product_name, r.contact_name, r.contact_email, r.referral_code, r.origin_iata, r.destination_iata].some((v) => String(v || "").toLowerCase().includes(q)));
+  }, [data, search]);
 
   if (!data) return <main className={styles.loading}><LoaderCircle className={styles.spin} /> {error || "Cargando administración de Rumbo…"}</main>;
 
@@ -76,6 +82,7 @@ export default function AdminPage() {
         <p className={styles.sideLabel}>Administración mayorista</p>
         <nav>
           <button className={tab === "summary" ? styles.active : ""} onClick={() => setTab("summary")}><ShieldCheck /> Resumen</button>
+          <button className={tab === "reservations" ? styles.active : ""} onClick={() => setTab("reservations")}><Plane /> Reservas</button>
           <button className={tab === "partners" ? styles.active : ""} onClick={() => setTab("partners")}><UsersRound /> Partners</button>
           <button className={tab === "retailers" ? styles.active : ""} onClick={() => setTab("retailers")}><Building2 /> Agencias</button>
           <button className={tab === "commissions" ? styles.active : ""} onClick={() => setTab("commissions")}><CircleDollarSign /> Comisiones</button>
@@ -86,22 +93,29 @@ export default function AdminPage() {
 
       <section className={styles.content}>
         <header className={styles.header}>
-          <div><p className={styles.eyebrow}>Rumbo · Backoffice propio</p><h1>Administración</h1><p>Partners, agencias, comisiones y control operativo conectados a PostgreSQL.</p></div>
-          <span className={styles.pending}>{pendingTotal} pendientes</span>
+          <div><p className={styles.eyebrow}>Rumbo · Backoffice propio</p><h1>Administración</h1><p>Reservas, Partners, agencias, comisiones y control operativo conectados a PostgreSQL.</p></div>
+          <div><span className={styles.pending}>{pendingTotal} por atender</span>{data.demo_mode ? <p className={styles.helper}>Modo demo · acceso libre</p> : null}</div>
         </header>
         {error ? <div className={styles.error}>{error}</div> : null}
 
         {tab === "summary" ? <>
           <div className={styles.metrics}>
+            <article><span>Reservas</span><strong>{data.metrics.reservations}</strong><small>{data.metrics.reservations_open} abiertas</small></article>
             <article><span>Partners</span><strong>{data.metrics.partners}</strong><small>{data.metrics.partners_pending} pendientes</small></article>
             <article><span>Agencias</span><strong>{data.metrics.retailers}</strong><small>{data.metrics.retailers_pending} pendientes</small></article>
             <article><span>Comisiones</span><strong>{data.metrics.commissions}</strong><small>{data.metrics.commissions_pending} pendientes</small></article>
-            <article><span>Regla Partner</span><strong>{(data.commission_settings.partner_rate * 100).toFixed(1)}%</strong><small>tasa global vigente</small></article>
           </div>
-          <section className={styles.card}><h2>Altas que requieren atención</h2><p className={styles.helper}>Aprueba primero las cuentas que ya tengan sus datos completos.</p>
-            <div className={styles.quickGrid}><div><strong>{data.metrics.partners_pending}</strong><span>Partners por aprobar</span><button onClick={() => setTab("partners")}>Revisar</button></div><div><strong>{data.metrics.retailers_pending}</strong><span>Agencias por aprobar</span><button onClick={() => setTab("retailers")}>Revisar</button></div></div>
+          <section className={styles.card}><h2>Operación que requiere atención</h2><p className={styles.helper}>Accesos rápidos al trabajo pendiente del mayorista.</p>
+            <div className={styles.quickGrid}><div><strong>{data.metrics.reservations_open}</strong><span>Reservas abiertas</span><button onClick={() => setTab("reservations")}>Revisar</button></div><div><strong>{data.metrics.partners_pending + data.metrics.retailers_pending}</strong><span>Altas por aprobar</span><button onClick={() => setTab("partners")}>Revisar</button></div></div>
           </section>
         </> : null}
+
+        {tab === "reservations" ? <section className={styles.card}>
+          <h2>Reservas</h2><p className={styles.helper}>Operaciones capturadas por Rumbo. El estado y el pago se leen directamente de PostgreSQL.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0" }}><Search size={17} /><input style={{ width: "min(420px,100%)", padding: "10px 12px", border: "1px solid #d0d5dd", borderRadius: 9 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar reserva, cliente, destino o referido" /></div>
+          <div className={styles.tableWrap}><table><thead><tr><th>Reserva</th><th>Cliente</th><th>Viaje</th><th>Salida</th><th>Referido</th><th>Pago</th><th>Estado</th></tr></thead><tbody>{filteredReservations.map((r) => <tr key={r.id}><td><strong>{r.reference}</strong><small>{r.product_name}</small></td><td><strong>{r.contact_name}</strong><small>{r.contact_email}</small></td><td>{r.origin_iata || "—"} → {r.destination_iata || "—"}<small>{r.adults} ad. · {r.children} niñ.</small></td><td>{shortDate(r.departure_date)}</td><td><code>{r.referral_code || "Directo"}</code></td><td><span className={styles.status}>{r.payment_status}</span></td><td><select disabled={busy === `reservations:${r.id}`} value={r.status} onChange={(e) => changeStatus("reservations", r.id, e.target.value)}><option value="new">Nueva</option><option value="validating">Validando</option><option value="quoted">Cotizada</option><option value="confirmed">Confirmada</option><option value="cancelled">Cancelada</option><option value="expired">Vencida</option></select></td></tr>)}</tbody></table></div>
+          {filteredReservations.length === 0 ? <p className={styles.helper}>No hay reservas que coincidan con la búsqueda.</p> : null}
+        </section> : null}
 
         {tab === "partners" ? <section className={styles.card}><h2>Partners</h2><p className={styles.helper}>Estado de alta, identidad, código de referido y red directa.</p><div className={styles.tableWrap}><table><thead><tr><th>Partner</th><th>Documento</th><th>Código</th><th>Red</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.partners.map((p) => <tr key={p.account_id}><td><strong>{p.first_name} {p.last_name}</strong><small>{p.email}</small></td><td>{p.document_type} {p.document_number}</td><td><code>{p.referral_code}</code></td><td>{p.direct_referrals}</td><td><span className={styles.status}>{p.status}</span></td><td><select disabled={busy === `partners:${p.account_id}`} value={p.status} onChange={(e) => changeStatus("partners", p.account_id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activo</option><option value="blocked">Bloqueado</option><option value="disabled">Deshabilitado</option></select></td></tr>)}</tbody></table></div></section> : null}
 
