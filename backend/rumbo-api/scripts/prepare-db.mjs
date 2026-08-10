@@ -13,6 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const migrations = [
   "070_rumbo_catalog.sql",
   "071_rumbo_catalog_search.sql",
+  "072_rumbo_catalog_commercial_rules.sql",
   "080_rumbo_native_bookings.sql",
 ];
 const pool = new Pool({
