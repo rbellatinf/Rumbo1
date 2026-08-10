@@ -10,16 +10,22 @@ if (!process.env.DATABASE_URL) {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const migrationPath = path.resolve(here, "../../postgres/init/070_rumbo_catalog.sql");
-const sql = await fs.readFile(migrationPath, "utf8");
+const migrations = [
+  "070_rumbo_catalog.sql",
+  "080_rumbo_native_bookings.sql",
+];
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
 });
 
 try {
-  await pool.query(sql);
-  console.log("Rumbo DB prepare OK: catálogo nativo verificado/aplicado.");
+  for (const file of migrations) {
+    const migrationPath = path.resolve(here, `../../postgres/init/${file}`);
+    const sql = await fs.readFile(migrationPath, "utf8");
+    await pool.query(sql);
+    console.log(`Rumbo DB prepare OK: ${file}`);
+  }
 } catch (error) {
   console.error("No se pudo preparar PostgreSQL:", error.message);
   process.exitCode = 1;
