@@ -4,6 +4,8 @@ import {
   backendMessage,
   noStoreJson,
   parseJson,
+  providerHeaders,
+  providerUrl,
   RUMBO_SESSION_COOKIE,
 } from "../../../../lib/rumbo-access";
 
@@ -16,27 +18,17 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token) return noStoreJson({ message: "No hay una sesión activa." }, 401);
 
-  const upstream = await fetch(`${provider.apiUrl}/api/v3/store/access/me`, {
-    headers: {
-      "X-Spree-API-Key": provider.apiKey,
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
+  const upstream = await fetch(
+    providerUrl(provider, "/api/access/me", "/api/v3/store/access/me"),
+    { headers: providerHeaders(provider, { token }), cache: "no-store" },
+  );
   const payload = await parseJson(upstream);
 
   if (!upstream.ok) {
-    const response = noStoreJson(
-      { message: backendMessage(payload, "La sesión venció o no es válida.") },
-      upstream.status || 401,
-    );
+    const response = noStoreJson({ message: backendMessage(payload, "La sesión venció o no es válida.") }, upstream.status || 401);
     response.cookies.delete(RUMBO_SESSION_COOKIE);
     return response;
   }
 
-  return noStoreJson({
-    account: payload.account,
-    profile: payload.profile,
-    redirectTo: payload.redirect_to,
-  });
+  return noStoreJson({ account: payload.account, profile: payload.profile, redirectTo: payload.redirect_to });
 }
