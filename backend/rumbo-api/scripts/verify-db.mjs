@@ -25,6 +25,9 @@ const requiredTables = [
   "rumbo_commissions",
   "rumbo_global_commission_settings",
   "rumbo_audit_events",
+  "rumbo_catalog_products",
+  "rumbo_catalog_departures",
+  "rumbo_catalog_images",
 ];
 
 try {
