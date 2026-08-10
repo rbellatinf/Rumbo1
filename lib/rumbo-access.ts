@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
 export const RUMBO_SESSION_COOKIE = "rumbo_session";
+export const DEFAULT_RUMBO_API_URL = "https://rumbo-api.onrender.com";
 
 export type AccessProvider = {
   kind: "rumbo" | "spree";
   apiUrl: string;
-  apiKey: string;
+  apiKey?: string;
 };
 
 export function demoMode() {
@@ -19,13 +20,13 @@ function normalizeServiceUrl(value: string | undefined) {
 }
 
 export function accessConfiguration(): AccessProvider | null {
-  const rumboUrl = normalizeServiceUrl(process.env.RUMBO_API_URL);
-  const rumboKey = process.env.RUMBO_API_KEY;
-  if (rumboUrl && rumboKey) return { kind: "rumbo", apiUrl: rumboUrl, apiKey: rumboKey };
+  const rumboUrl = normalizeServiceUrl(process.env.RUMBO_API_URL) || DEFAULT_RUMBO_API_URL;
+  const rumboKey = process.env.RUMBO_API_KEY?.trim() || undefined;
+  if (rumboUrl) return { kind: "rumbo", apiUrl: rumboUrl, apiKey: rumboKey };
 
   const spreeUrl = normalizeServiceUrl(process.env.SPREE_API_URL);
-  const spreeKey = process.env.SPREE_PUBLISHABLE_API_KEY;
-  return spreeUrl && spreeKey ? { kind: "spree", apiUrl: spreeUrl, apiKey: spreeKey } : null;
+  const spreeKey = process.env.SPREE_PUBLISHABLE_API_KEY?.trim() || undefined;
+  return spreeUrl ? { kind: "spree", apiUrl: spreeUrl, apiKey: spreeKey } : null;
 }
 
 export function providerUrl(provider: AccessProvider, rumboPath: string, spreePath: string) {
@@ -36,9 +37,8 @@ export function providerHeaders(
   provider: AccessProvider,
   options: { token?: string; json?: boolean; demoRole?: "wholesaler_admin" | "partner" | "retailer" } = {},
 ): Record<string, string> {
-  const headers: Record<string, string> = {
-    [provider.kind === "rumbo" ? "X-Rumbo-API-Key" : "X-Spree-API-Key"]: provider.apiKey,
-  };
+  const headers: Record<string, string> = {};
+  if (provider.apiKey) headers[provider.kind === "rumbo" ? "X-Rumbo-API-Key" : "X-Spree-API-Key"] = provider.apiKey;
   if (options.json) headers["Content-Type"] = "application/json";
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
   if (provider.kind === "rumbo" && demoMode() && options.demoRole) headers["X-Rumbo-Demo-Role"] = options.demoRole;
