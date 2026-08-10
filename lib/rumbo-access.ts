@@ -12,12 +12,18 @@ export function demoMode() {
   return /^(1|true|yes)$/i.test(process.env.RUMBO_DEMO_MODE || "");
 }
 
+function normalizeServiceUrl(value: string | undefined) {
+  const clean = value?.trim().replace(/\/$/, "");
+  if (!clean) return "";
+  return /^https?:\/\//i.test(clean) ? clean : `http://${clean}`;
+}
+
 export function accessConfiguration(): AccessProvider | null {
-  const rumboUrl = process.env.RUMBO_API_URL?.replace(/\/$/, "");
+  const rumboUrl = normalizeServiceUrl(process.env.RUMBO_API_URL);
   const rumboKey = process.env.RUMBO_API_KEY;
   if (rumboUrl && rumboKey) return { kind: "rumbo", apiUrl: rumboUrl, apiKey: rumboKey };
 
-  const spreeUrl = process.env.SPREE_API_URL?.replace(/\/$/, "");
+  const spreeUrl = normalizeServiceUrl(process.env.SPREE_API_URL);
   const spreeKey = process.env.SPREE_PUBLISHABLE_API_KEY;
   return spreeUrl && spreeKey ? { kind: "spree", apiUrl: spreeUrl, apiKey: spreeKey } : null;
 }
