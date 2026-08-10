@@ -10,23 +10,9 @@ function spreeConfiguration() {
   return apiUrl && apiKey ? { apiUrl, apiKey } : null;
 }
 
-function noStoreJson(payload: unknown, status = 200) {
-  return NextResponse.json(payload, { status, headers: { "Cache-Control": "no-store" } });
-}
-
-async function responsePayload(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return {};
-  try { return JSON.parse(text) as unknown; }
-  catch { return { error: { message: text.slice(0, 300) } }; }
-}
-
-function upstreamMessage(payload: unknown): string {
-  if (!payload || typeof payload !== "object") return "";
-  const source = payload as Record<string, unknown>;
-  const error = source.error && typeof source.error === "object" ? (source.error as Record<string, unknown>) : null;
-  return typeof error?.message === "string" ? error.message : "";
-}
+function noStoreJson(payload: unknown, status = 200) { return NextResponse.json(payload, { status, headers: { "Cache-Control": "no-store" } }); }
+async function responsePayload(response: Response): Promise<unknown> { const text = await response.text(); if (!text) return {}; try { return JSON.parse(text) as unknown; } catch { return { error: { message: text.slice(0, 300) } }; } }
+function upstreamMessage(payload: unknown): string { if (!payload || typeof payload !== "object") return ""; const source = payload as Record<string, unknown>; const error = source.error && typeof source.error === "object" ? (source.error as Record<string, unknown>) : null; return typeof error?.message === "string" ? error.message : ""; }
 
 export async function GET(request: NextRequest) {
   const productId = request.nextUrl.searchParams.get("productId")?.trim();
@@ -43,18 +29,24 @@ export async function GET(request: NextRequest) {
       const payload = await parseJson(response) as { products?: Array<Record<string, unknown>> };
       const product = payload.products?.find((item) => String(item.id) === nativeId);
       if (!response.ok || !product) return noStoreJson({ message: "La oferta ya no está disponible." }, 404);
-      const available = product.available_capacity == null ? 999999 : Number(product.available_capacity);
+      const departures = Array.isArray(product.departures) ? product.departures as Array<Record<string, unknown>> : [];
+      const departure = departures.find((item) => String(item.departure_date || "") === departureDate && String(item.return_date || "") === returnDate) || departures[0];
+      if (!departure) return noStoreJson({ message: "No encontramos una salida activa para esas fechas." }, 404);
+      const available = departure.available_capacity == null ? 999999 : Number(departure.available_capacity);
+      const capacity = departure.capacity == null ? available : Number(departure.capacity);
+      const amount = Number(departure.price_amount || 0);
+      const currency = String(departure.currency || "USD");
       const parsed = parseOfferAvailability({
         product_id: productId,
-        variant_id: String(product.departure_id || ""),
-        departure_date: String(product.departure_date || departureDate),
-        return_date: String(product.return_date || returnDate),
-        total_capacity: product.capacity == null ? available : Number(product.capacity),
+        variant_id: String(departure.id || ""),
+        departure_date: String(departure.departure_date || departureDate),
+        return_date: String(departure.return_date || returnDate),
+        total_capacity: capacity,
         remaining_capacity: available,
-        price_amount: Number(product.price_amount || 0),
-        price_display: `${String(product.currency || "USD")} ${Number(product.price_amount || 0).toFixed(2)}`,
-        currency: String(product.currency || "USD"),
-        bookable: Boolean(product.departure_id && Number(product.price_amount || 0) > 0 && available > 0),
+        price_amount: amount,
+        price_display: `${currency} ${amount.toFixed(2)}`,
+        currency,
+        bookable: Boolean(departure.id && amount > 0 && available > 0),
         hold_minutes: 15,
       });
       return noStoreJson({ availability: parsed });
