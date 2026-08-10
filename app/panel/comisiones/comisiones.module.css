@@ -93,6 +93,17 @@
 
 .form { display: grid; gap: 18px; }
 
+.errorMessage {
+  margin: -8px 0 18px;
+  padding: 11px 13px;
+  border: 1px solid #f1c7c7;
+  border-radius: 9px;
+  background: #fff7f7;
+  color: #9b3b3b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .card {
   overflow: hidden;
   border: 1px solid #dfe3e8;
@@ -322,6 +333,14 @@
 }
 
 .primary svg { width: 15px; height: 15px; }
+
+.spinner {
+  animation: commission-spin .8s linear infinite;
+}
+
+@keyframes commission-spin {
+  to { transform: rotate(360deg); }
+}
 
 .secondary:disabled,
 .primary:disabled {
