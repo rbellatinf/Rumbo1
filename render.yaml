@@ -7,7 +7,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm start
     autoDeployTrigger: checksPass
     envVars:
@@ -17,25 +17,26 @@ services:
         fromService:
           name: rumbo-api
           type: web
-          property: host
+          property: hostport
       - key: RUMBO_API_KEY
-        sync: false
+        fromService:
+          name: rumbo-api
+          type: web
+          envVarKey: RUMBO_API_KEY
       - key: RUMBO_DEMO_MODE
         value: "false"
       - key: SPREE_API_URL
         fromService:
           name: rumbo1-spree
           type: web
-          property: host
-      - key: SPREE_PUBLISHABLE_API_KEY
-        sync: false
+          property: hostport
 
   - type: web
     name: rumbo-api
     runtime: node
     plan: free
     region: oregon
-    buildCommand: cd backend/rumbo-api && npm install
+    buildCommand: cd backend/rumbo-api && npm ci
     startCommand: cd backend/rumbo-api && npm run start:real
     healthCheckPath: /health
     autoDeployTrigger: checksPass
@@ -45,7 +46,7 @@ services:
           name: rumbo1-postgres
           property: connectionString
       - key: RUMBO_API_KEY
-        sync: false
+        generateValue: true
       - key: RUMBO_DEMO_MODE
         value: "false"
       - key: RUMBO_ADMIN_EMAIL
