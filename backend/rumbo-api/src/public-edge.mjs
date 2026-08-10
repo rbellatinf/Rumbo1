@@ -3,10 +3,15 @@ import express from "express";
 
 const PORT = Number(process.env.PORT || 4000);
 const GATEWAY_PORT = Number(process.env.RUMBO_GATEWAY_PORT || 4001);
+const CORE_PORT = Number(process.env.RUMBO_CORE_PORT || 4002);
 const API_KEY = process.env.RUMBO_API_KEY || "";
 
 const gateway = spawn(process.execPath, [new URL("./gateway.mjs", import.meta.url).pathname], {
-  env: { ...process.env, PORT: String(GATEWAY_PORT) },
+  env: {
+    ...process.env,
+    PORT: String(GATEWAY_PORT),
+    RUMBO_CORE_PORT: String(CORE_PORT),
+  },
   stdio: "inherit",
 });
 
@@ -47,4 +52,4 @@ app.use(async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Rumbo public edge listening on ${PORT}; gateway=${GATEWAY_PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Rumbo public edge listening on ${PORT}; gateway=${GATEWAY_PORT}; core=${CORE_PORT}`));
