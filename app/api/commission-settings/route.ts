@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   accessConfiguration,
   backendMessage,
+  demoMode,
   noStoreJson,
   parseJson,
   providerHeaders,
@@ -14,13 +15,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const provider = accessConfiguration();
   if (!provider) return noStoreJson({ message: "La configuración de comisiones todavía no está disponible." }, 503);
-
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
-  if (provider.kind === "rumbo" && !token) return noStoreJson({ message: "No hay una sesión activa." }, 401);
+  if (provider.kind === "rumbo" && !token && !demoMode()) return noStoreJson({ message: "No hay una sesión activa." }, 401);
 
   const upstream = await fetch(
     providerUrl(provider, "/api/commission-settings", "/api/v3/store/commission_settings"),
-    { headers: providerHeaders(provider, { token }), cache: "no-store" },
+    { headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }), cache: "no-store" },
   );
   const payload = await parseJson(upstream);
   if (!upstream.ok) return noStoreJson({ message: backendMessage(payload, "No pudimos leer las comisiones.") }, upstream.status || 502);
@@ -30,9 +30,8 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const provider = accessConfiguration();
   if (!provider) return noStoreJson({ message: "La configuración de comisiones todavía no está disponible." }, 503);
-
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
-  if (provider.kind === "rumbo" && !token) return noStoreJson({ message: "No hay una sesión activa." }, 401);
+  if (provider.kind === "rumbo" && !token && !demoMode()) return noStoreJson({ message: "No hay una sesión activa." }, 401);
 
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; }
@@ -42,7 +41,7 @@ export async function PATCH(request: NextRequest) {
     providerUrl(provider, "/api/commission-settings", "/api/v3/store/commission_settings"),
     {
       method: "PATCH",
-      headers: providerHeaders(provider, { token, json: true }),
+      headers: providerHeaders(provider, { token, json: true, demoRole: "wholesaler_admin" }),
       body: JSON.stringify(body),
       cache: "no-store",
     },
