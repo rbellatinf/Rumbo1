@@ -68,7 +68,7 @@ app.get("/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
     const coreHealth = await fetch(`http://127.0.0.1:${CORE_PORT}/health`).then((r) => r.ok).catch(() => false);
-    res.status(coreHealth ? 200 : 503).json({ status: coreHealth ? "ok" : "degraded", service: "rumbo-api", catalog: "native", demo_mode: DEMO_MODE });
+    res.status(coreHealth ? 200 : 503).json({ status: coreHealth ? "ok" : "degraded", service: "rumbo-api", catalog: "native", bookings: "native", demo_mode: DEMO_MODE });
   } catch {
     res.status(503).json({ status: "error" });
   }
@@ -111,6 +111,112 @@ app.get("/api/catalog", async (req, res) => {
   if (destination && /^[A-Z]{3}$/.test(destination)) { values.push(destination); where += ` AND p.destination_iata=$${values.length}`; }
   const { rows } = await pool.query(`${catalogSelect}${where} ORDER BY p.featured DESC,p.sort_order,p.created_at DESC LIMIT 100`, values);
   res.json({ mode: "live", source: "rumbo", products: rows });
+});
+
+function bookingResponse(row, departure) {
+  const unit = Number(departure?.price_amount ?? 0);
+  const travellers = Number(row.adults || 0) + Number(row.children || 0);
+  return {
+    id: row.id,
+    reference: row.reference,
+    status: row.status,
+    product_name: row.product_name,
+    country: row.country,
+    departure_date: row.departure_date,
+    return_date: row.return_date,
+    adults: row.adults,
+    children: row.children,
+    contact_channel: row.contact_channel,
+    unit_price_amount: unit || null,
+    total_amount: unit ? unit * travellers : null,
+    price_display: row.price_display,
+    currency: row.currency,
+    remaining_capacity: departure?.available_capacity ?? null,
+    payment_status: "pending",
+    payment_url: null,
+    hold_expires_at: null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+app.post("/api/bookings", async (req, res) => {
+  const body = req.body || {};
+  const idempotency = clean(body.idempotency_key);
+  const productId = clean(body.catalog_product_id || body.rumbo_product_id || body.spree_product_id);
+  const departureId = clean(body.catalog_departure_id || body.variant_id || body.spree_variant_id);
+  const email = clean(body.contact_email).toLowerCase();
+  const name = clean(body.contact_name);
+  const phone = clean(body.contact_phone);
+  const adults = Number(body.adults || 1), children = Number(body.children || 0);
+  const referral = clean(body.referral_code).toUpperCase();
+  if (!/^[0-9a-f-]{36}$/i.test(idempotency) || !productId || !email || !name || !phone || adults < 1 || adults > 9 || children < 0 || children > 9) {
+    return res.status(422).json({ error: { message: "La solicitud de reserva está incompleta." } });
+  }
+
+  const existing = await pool.query(`SELECT * FROM rumbo_booking_requests WHERE idempotency_key=$1::uuid LIMIT 1`, [idempotency]);
+  if (existing.rows[0]) {
+    const dep = existing.rows[0].catalog_departure_id ? await pool.query(`SELECT price_amount::float8,available_capacity FROM rumbo_catalog_departures WHERE id=$1`, [existing.rows[0].catalog_departure_id]) : { rows: [] };
+    return res.json(bookingResponse(existing.rows[0], dep.rows[0]));
+  }
+
+  if (referral) {
+    const valid = await pool.query(`SELECT 1 FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.referral_code=$1 AND a.status='active'`, [referral]);
+    if (!valid.rowCount) return res.status(422).json({ error: { message: "El enlace del Partner ya no es válido." } });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const productResult = await client.query(`SELECT * FROM rumbo_catalog_products WHERE id=$1::uuid AND status='published' FOR SHARE`, [productId]);
+    const product = productResult.rows[0];
+    if (!product) { await client.query("ROLLBACK"); return res.status(404).json({ error: { message: "El producto ya no está disponible." } }); }
+
+    let depQuery = `SELECT * FROM rumbo_catalog_departures WHERE product_id=$1 AND status='active'`;
+    const depValues = [product.id];
+    if (departureId && /^[0-9a-f-]{36}$/i.test(departureId)) { depValues.push(departureId); depQuery += ` AND id=$2::uuid`; }
+    else if (clean(body.departure_date)) { depValues.push(clean(body.departure_date)); depQuery += ` AND departure_date=$2::date`; }
+    depQuery += ` ORDER BY departure_date NULLS LAST,price_amount LIMIT 1 FOR UPDATE`;
+    const departureResult = await client.query(depQuery, depValues);
+    const departure = departureResult.rows[0];
+    if (!departure) { await client.query("ROLLBACK"); return res.status(409).json({ error: { message: "No encontramos una salida disponible para esas fechas." } }); }
+    const travellers = adults + children;
+    if (departure.available_capacity != null && Number(departure.available_capacity) < travellers) {
+      await client.query("ROLLBACK"); return res.status(409).json({ error: { message: "No quedan suficientes cupos para todos los viajeros." } });
+    }
+
+    if (departure.available_capacity != null) {
+      await client.query(`UPDATE rumbo_catalog_departures SET available_capacity=available_capacity-$2,updated_at=now() WHERE id=$1`, [departure.id, travellers]);
+      departure.available_capacity = Number(departure.available_capacity) - travellers;
+    }
+    await client.query(`SELECT set_config('rumbo.actor',$1,true)`, [email]);
+    const priceDisplay = `${departure.currency} ${Number(departure.price_amount).toFixed(2)}`;
+    const snapshot = { image: body.product_snapshot?.image, duration: product.duration_label, tag: product.tag, included: product.included || [] };
+    const inserted = await client.query(
+      `INSERT INTO rumbo_booking_requests(
+        idempotency_key,catalog_product_id,catalog_departure_id,spree_product_id,spree_variant_id,product_slug,product_name,provider,provider_reference,country,
+        origin_iata,destination_iata,departure_date,return_date,adults,children,price_display,currency,contact_name,contact_email,contact_phone,contact_channel,
+        referral_code,notes,product_snapshot,status,consent_accepted_at)
+       VALUES($1::uuid,$2,$3,NULL,NULL,$4,$5,'Rumbo',$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,'new',now()) RETURNING *`,
+      [idempotency,product.id,departure.id,product.slug,product.name,product.provider_reference,product.country,clean(body.origin_iata).toUpperCase(),product.destination_iata,departure.departure_date,departure.return_date,adults,children,priceDisplay,departure.currency,name,email,phone,clean(body.contact_channel)||"whatsapp",referral||null,clean(body.notes)||null,JSON.stringify(snapshot)],
+    );
+    await client.query("COMMIT");
+    res.status(201).json(bookingResponse(inserted.rows[0], departure));
+  } catch (error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    console.error(error);
+    res.status(500).json({ error: { message: "No pudimos crear la reserva en Rumbo." } });
+  } finally { client.release(); }
+});
+
+app.get("/api/bookings/:reference", async (req, res) => {
+  const reference = clean(req.params.reference).toUpperCase();
+  const email = clean(req.query.email).toLowerCase();
+  if (!reference || !email) return res.status(422).json({ error: { message: "Referencia y correo son obligatorios." } });
+  const { rows } = await pool.query(`SELECT * FROM rumbo_booking_requests WHERE reference=$1 AND lower(contact_email)=$2 LIMIT 1`, [reference,email]);
+  if (!rows[0]) return res.status(404).json({ error: { message: "No encontramos una reserva con esos datos." } });
+  const dep = rows[0].catalog_departure_id ? await pool.query(`SELECT price_amount::float8,available_capacity FROM rumbo_catalog_departures WHERE id=$1`, [rows[0].catalog_departure_id]) : { rows: [] };
+  res.json(bookingResponse(rows[0], dep.rows[0]));
 });
 
 app.get("/api/admin/catalog", requireAdmin, async (_req, res) => {
