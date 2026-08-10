@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   accessConfiguration,
   backendMessage,
+  demoMode,
   noStoreJson,
   parseJson,
   providerHeaders,
@@ -16,10 +17,10 @@ export async function GET(request: NextRequest) {
     return noStoreJson({ message: "El backoffice propio de Rumbo todavía no está conectado." }, 503);
   }
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
-  if (!token) return noStoreJson({ message: "No hay una sesión administrativa activa." }, 401);
+  if (!token && !demoMode()) return noStoreJson({ message: "No hay una sesión administrativa activa." }, 401);
 
   const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
-    headers: providerHeaders(provider, { token }),
+    headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
     cache: "no-store",
   });
   const payload = await parseJson(upstream);
