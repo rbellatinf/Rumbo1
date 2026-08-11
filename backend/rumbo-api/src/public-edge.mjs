@@ -67,6 +67,28 @@ function rawJson(req) {
   }
 }
 
+async function adminAccount(req) {
+  const header = req.get("Authorization") || "";
+  if (!header.startsWith("Bearer ")) return null;
+  const token = header.slice(7).trim();
+  if (!token) return null;
+  const { rows } = await pool.query(
+    `SELECT a.id,a.email,a.role FROM rumbo_auth_sessions s JOIN rumbo_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND a.status='active' LIMIT 1`,
+    [sha256(token)],
+  );
+  return rows[0]?.role === "wholesaler_admin" ? rows[0] : null;
+}
+
+async function requireAdmin(req, res) {
+  if (!requirePublicApiKey(req, res)) return null;
+  const account = await adminAccount(req);
+  if (!account) {
+    res.status(401).json({ error: { message: "Se requiere una sesión administrativa de Rumbo." } });
+    return null;
+  }
+  return account;
+}
+
 async function sendResetEmail(email, token) {
   if (!RESEND_API_KEY || !MAIL_FROM) {
     console.warn("Password recovery email skipped: RESEND_API_KEY or RUMBO_MAIL_FROM is missing.");
@@ -150,6 +172,73 @@ app.post("/api/access/reset-password", async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+app.get("/api/admin/pricing", async (req, res) => {
+  const admin = await requireAdmin(req, res); if (!admin) return;
+  const { rows: programs } = await pool.query(`SELECT p.*,COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.priority,r.created_at) FILTER (WHERE r.id IS NOT NULL),'[]'::jsonb) AS rules FROM rumbo_pricing_programs p LEFT JOIN rumbo_pricing_rules r ON r.program_id=p.id GROUP BY p.id ORDER BY p.priority,p.created_at DESC`);
+  res.json({ programs });
+});
+
+app.post("/api/admin/pricing/programs", async (req, res) => {
+  const admin = await requireAdmin(req, res); if (!admin) return;
+  const body = rawJson(req); if (!body) return res.status(400).json({ error: { message: "Formulario inválido." } });
+  const type = String(body.program_type || "").trim();
+  const code = String(body.code || "").trim().toUpperCase().replace(/[^A-Z0-9-]+/g,"-");
+  const name = String(body.name || "").trim();
+  if (!code || !name || !["campaign","season","administrative"].includes(type)) return res.status(422).json({ error: { message: "Código, nombre y tipo son obligatorios." } });
+  try {
+    const { rows } = await pool.query(`INSERT INTO rumbo_pricing_programs(code,name,program_type,description,sale_start,sale_end,travel_start,travel_end,priority,status,created_by) VALUES($1,$2,$3,$4,NULLIF($5,'')::date,NULLIF($6,'')::date,NULLIF($7,'')::date,NULLIF($8,'')::date,$9,$10,$11) RETURNING *`, [code,name,type,String(body.description||"").trim()||null,String(body.sale_start||""),String(body.sale_end||""),String(body.travel_start||""),String(body.travel_end||""),Number(body.priority)||100,String(body.status||"active"),admin.id]);
+    res.status(201).json({ program: rows[0] });
+  } catch (error) {
+    if (error.code === "23505") return res.status(409).json({ error: { message: "Ya existe un programa con ese código." } });
+    console.error(error); res.status(500).json({ error: { message: "No pudimos crear el programa de pricing." } });
+  }
+});
+
+app.post("/api/admin/pricing/rules", async (req, res) => {
+  const admin = await requireAdmin(req, res); if (!admin) return;
+  const body = rawJson(req); if (!body) return res.status(400).json({ error: { message: "Formulario inválido." } });
+  const name=String(body.name||"").trim(), effect=String(body.effect||""), calculation=String(body.calculation_type||""), scope=String(body.scope_type||"all");
+  const value=Number(body.value); const scopeValue=scope==="all"?null:String(body.scope_value||"").trim().toUpperCase();
+  if (!name || !["charge","discount"].includes(effect) || !["percent","fixed_booking","fixed_passenger"].includes(calculation) || !Number.isFinite(value) || value<0 || !["all","region","destination","product","tag","provider"].includes(scope) || (scope!=="all"&&!scopeValue)) return res.status(422).json({ error: { message: "Completa correctamente la regla de pricing." } });
+  try {
+    const { rows } = await pool.query(`INSERT INTO rumbo_pricing_rules(program_id,name,effect,calculation_type,value,currency,scope_type,scope_value,sale_start,sale_end,travel_start,travel_end,priority,stackable,is_active,created_by) VALUES(NULLIF($1,'')::uuid,$2,$3,$4,$5,NULLIF($6,''),$7,$8,NULLIF($9,'')::date,NULLIF($10,'')::date,NULLIF($11,'')::date,NULLIF($12,'')::date,$13,$14,$15,$16) RETURNING *`, [String(body.program_id||""),name,effect,calculation,value,calculation==="percent"?"":String(body.currency||"USD").trim().toUpperCase(),scope,scopeValue,String(body.sale_start||""),String(body.sale_end||""),String(body.travel_start||""),String(body.travel_end||""),Number(body.priority)||100,body.stackable!==false,body.is_active!==false,admin.id]);
+    res.status(201).json({ rule: rows[0] });
+  } catch(error) { console.error(error); res.status(500).json({ error: { message: "No pudimos crear la regla de pricing." } }); }
+});
+
+app.patch("/api/admin/pricing/rules/:id", async (req, res) => {
+  const admin = await requireAdmin(req, res); if (!admin) return;
+  const body = rawJson(req); if (!body) return res.status(400).json({ error: { message: "Formulario inválido." } });
+  const { rows } = await pool.query(`UPDATE rumbo_pricing_rules SET is_active=COALESCE($2,is_active),updated_at=now() WHERE id=$1::uuid RETURNING *`, [req.params.id,typeof body.is_active==="boolean"?body.is_active:null]);
+  if (!rows[0]) return res.status(404).json({ error: { message: "Regla no encontrada." } });
+  res.json({ rule: rows[0] });
+});
+
+app.post("/api/admin/pricing/simulate", async (req, res) => {
+  const admin = await requireAdmin(req, res); if (!admin) return;
+  const body = rawJson(req); if (!body) return res.status(400).json({ error: { message: "Formulario inválido." } });
+  const base=Number(body.base_amount), travellers=Math.max(1,Number(body.travellers)||1), currency=String(body.currency||"USD").trim().toUpperCase();
+  if (!Number.isFinite(base)||base<0) return res.status(422).json({ error: { message: "Precio base inválido." } });
+  const saleDate=String(body.sale_date||new Date().toISOString().slice(0,10)), travelDate=String(body.travel_date||saleDate);
+  const ctx={region:String(body.region||"").trim().toUpperCase(),destination:String(body.destination||"").trim().toUpperCase(),product:String(body.product||"").trim().toUpperCase(),tag:String(body.tag||"").trim().toUpperCase(),provider:String(body.provider||"").trim().toUpperCase()};
+  const { rows } = await pool.query(`SELECT r.*,p.name AS program_name,p.program_type FROM rumbo_pricing_rules r LEFT JOIN rumbo_pricing_programs p ON p.id=r.program_id WHERE r.is_active=true AND (p.id IS NULL OR p.status='active') AND (r.sale_start IS NULL OR r.sale_start<=$1::date) AND (r.sale_end IS NULL OR r.sale_end>=$1::date) AND (r.travel_start IS NULL OR r.travel_start<=$2::date) AND (r.travel_end IS NULL OR r.travel_end>=$2::date) AND (p.sale_start IS NULL OR p.sale_start<=$1::date) AND (p.sale_end IS NULL OR p.sale_end>=$1::date) AND (p.travel_start IS NULL OR p.travel_start<=$2::date) AND (p.travel_end IS NULL OR p.travel_end>=$2::date) ORDER BY COALESCE(p.priority,100),r.priority,r.created_at`,[saleDate,travelDate]);
+  let total=base; const applied=[];
+  for (const r of rows) {
+    const scopeKey=r.scope_type; const match=r.scope_type==="all" || (ctx[scopeKey] && ctx[scopeKey]===String(r.scope_value||"").toUpperCase());
+    if (!match) continue;
+    if (r.calculation_type!=="percent" && r.currency && r.currency!==currency) continue;
+    let amount=0;
+    if (r.calculation_type==="percent") amount=total*(Number(r.value)/100);
+    else if (r.calculation_type==="fixed_booking") amount=Number(r.value);
+    else amount=Number(r.value)*travellers;
+    if (r.effect==="discount") amount=-amount;
+    total=Math.max(0,total+amount);
+    applied.push({ id:r.id,name:r.name,program_name:r.program_name,program_type:r.program_type,effect:r.effect,calculation_type:r.calculation_type,value:Number(r.value),amount:Number(amount.toFixed(2)),running_total:Number(total.toFixed(2)) });
+    if (!r.stackable) break;
+  }
+  res.json({ currency,base_amount:Number(base.toFixed(2)),travellers,applied,total_amount:Number(total.toFixed(2)),delta_amount:Number((total-base).toFixed(2)) });
 });
 
 function agencyPath(pathname, method) {
