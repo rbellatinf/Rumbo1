@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import styles from "./admin.module.css";
 
+type Retailer = { id: string; legal_name: string; trade_name: string; tax_id: string; contact_email?: string; phone?: string; status: string; member_count: number; created_at: string };
+type AgencyMember = { account_id: string; first_name: string; last_name: string; member_role: "admin" | "counter"; email: string; status: string; display_status?: string; last_login_at?: string | null };
 type AdminPayload = {
   metrics: { partners: number; partners_pending: number; retailers: number; retailers_pending: number; commissions: number; commissions_pending: number; reservations: number; reservations_open: number };
   partners: Array<{ account_id: string; first_name: string; last_name: string; document_type: string; document_number: string; phone?: string; referral_code: string; email: string; status: string; direct_referrals: number; created_at: string }>;
-  retailers: Array<{ id: string; legal_name: string; trade_name: string; tax_id: string; contact_email?: string; phone?: string; status: string; member_count: number; created_at: string }>;
+  retailers: Retailer[];
   commissions: Array<{ id: string; beneficiary_type: string; currency: string; base_amount: number; rate: number; commission_amount: number; status: string; reference: string; created_at: string }>;
   reservations: Array<{ id: string; reference: string; product_name: string; provider: string; origin_iata?: string; destination_iata?: string; departure_date?: string; return_date?: string; adults: number; children: number; currency?: string; price_display?: string; contact_name: string; contact_email: string; contact_phone: string; referral_code?: string; status: string; payment_status: string; created_at: string }>;
   commission_settings: { partner_rate: number; sponsor_rate: number; retailer_rate: number; updated_at?: string };
@@ -17,7 +19,6 @@ type AdminPayload = {
 };
 
 type Tab = "summary" | "reservations" | "partners" | "retailers" | "commissions" | "audit";
-
 const money = (amount: number, currency: string) => new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(amount || 0);
 const date = (value: string) => new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const shortDate = (value?: string) => value ? new Intl.DateTimeFormat("es-PE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "—";
@@ -29,6 +30,10 @@ export default function AdminPage() {
   const [busy, setBusy] = useState("");
   const [search, setSearch] = useState("");
   const [rates, setRates] = useState({ partner: 6, sponsor: 0, retailer: 0 });
+  const [selectedRetailer, setSelectedRetailer] = useState<Retailer | null>(null);
+  const [agencyMembers, setAgencyMembers] = useState<AgencyMember[]>([]);
+  const [agencyCapacity, setAgencyCapacity] = useState<{ active:number; total:number; limit:number } | null>(null);
+  const [agencyMessage, setAgencyMessage] = useState("");
 
   async function load() {
     const response = await fetch("/api/admin/overview", { cache: "no-store" });
@@ -42,6 +47,24 @@ export default function AdminPage() {
   }
 
   useEffect(() => { load().catch((e) => setError(e instanceof Error ? e.message : "Error de carga")); }, []);
+
+  async function selectRetailer(retailer: Retailer) {
+    setSelectedRetailer(retailer);
+    setAgencyMembers([]);
+    setAgencyCapacity(null);
+    setAgencyMessage("Cargando usuarios…");
+    try {
+      const response = await fetch(`/api/admin/agencies/${retailer.id}/users`, { cache: "no-store" });
+      const text = await response.text();
+      const payload = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(payload.message || "No pudimos cargar los usuarios de la agencia.");
+      setAgencyMembers(payload.members || []);
+      setAgencyCapacity(payload.user_capacity || null);
+      setAgencyMessage("");
+    } catch (e) {
+      setAgencyMessage(e instanceof Error ? e.message : "No pudimos cargar los usuarios de la agencia.");
+    }
+  }
 
   async function changeStatus(type: "partners" | "retailers" | "reservations", id: string, status: string) {
     setBusy(`${type}:${id}`); setError("");
@@ -114,12 +137,22 @@ export default function AdminPage() {
           <h2>Reservas</h2><p className={styles.helper}>Operaciones capturadas por Rumbo. El estado y el pago se leen directamente de PostgreSQL.</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0" }}><Search size={17} /><input style={{ width: "min(420px,100%)", padding: "10px 12px", border: "1px solid #d0d5dd", borderRadius: 9 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar reserva, cliente, destino o referido" /></div>
           <div className={styles.tableWrap}><table><thead><tr><th>Reserva</th><th>Cliente</th><th>Viaje</th><th>Salida</th><th>Referido</th><th>Pago</th><th>Estado</th></tr></thead><tbody>{filteredReservations.map((r) => <tr key={r.id}><td><strong>{r.reference}</strong><small>{r.product_name}</small></td><td><strong>{r.contact_name}</strong><small>{r.contact_email}</small></td><td>{r.origin_iata || "—"} → {r.destination_iata || "—"}<small>{r.adults} ad. · {r.children} niñ.</small></td><td>{shortDate(r.departure_date)}</td><td><code>{r.referral_code || "Directo"}</code></td><td><span className={styles.status}>{r.payment_status}</span></td><td><select disabled={busy === `reservations:${r.id}`} value={r.status} onChange={(e) => changeStatus("reservations", r.id, e.target.value)}><option value="new">Nueva</option><option value="validating">Validando</option><option value="quoted">Cotizada</option><option value="confirmed">Confirmada</option><option value="cancelled">Cancelada</option><option value="expired">Vencida</option></select></td></tr>)}</tbody></table></div>
-          {filteredReservations.length === 0 ? <p className={styles.helper}>No hay reservas que coincidan con la búsqueda.</p> : null}
+          {filteredReservations.length === 0 ? <p className={styles.helper}>Todavía no hay reservas para mostrar.</p> : null}
         </section> : null}
 
         {tab === "partners" ? <section className={styles.card}><h2>Partners</h2><p className={styles.helper}>Estado de alta, identidad, código de referido y red directa.</p><div className={styles.tableWrap}><table><thead><tr><th>Partner</th><th>Documento</th><th>Código</th><th>Red</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.partners.map((p) => <tr key={p.account_id}><td><strong>{p.first_name} {p.last_name}</strong><small>{p.email}</small></td><td>{p.document_type} {p.document_number}</td><td><code>{p.referral_code}</code></td><td>{p.direct_referrals}</td><td><span className={styles.status}>{p.status}</span></td><td><select disabled={busy === `partners:${p.account_id}`} value={p.status} onChange={(e) => changeStatus("partners", p.account_id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activo</option><option value="blocked">Bloqueado</option><option value="disabled">Deshabilitado</option></select></td></tr>)}</tbody></table></div></section> : null}
 
-        {tab === "retailers" ? <section className={styles.card}><h2>Agencias minoristas</h2><p className={styles.helper}>Empresas registradas, usuarios asociados y estado comercial.</p><div className={styles.tableWrap}><table><thead><tr><th>Agencia</th><th>RUC</th><th>Contacto</th><th>Usuarios</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.retailers.map((r) => <tr key={r.id}><td><strong>{r.trade_name}</strong><small>{r.legal_name}</small></td><td>{r.tax_id}</td><td>{r.contact_email || "—"}</td><td>{r.member_count}</td><td><span className={styles.status}>{r.status}</span></td><td><select disabled={busy === `retailers:${r.id}`} value={r.status} onChange={(e) => changeStatus("retailers", r.id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activa</option><option value="suspended">Suspendida</option><option value="rejected">Rechazada</option></select></td></tr>)}</tbody></table></div></section> : null}
+        {tab === "retailers" ? <>
+          <section className={styles.card}><h2>Agencias minoristas</h2><p className={styles.helper}>Haz clic en una agencia para ver debajo sus usuarios.</p><div className={styles.tableWrap}><table><thead><tr><th>Agencia</th><th>RUC</th><th>Contacto</th><th>Usuarios</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.retailers.map((r) => <tr key={r.id} onClick={() => selectRetailer(r)} style={{cursor:"pointer",background:selectedRetailer?.id===r.id?"#eef5fb":"transparent"}}><td><strong>{r.trade_name}</strong><small>{r.legal_name}</small></td><td>{r.tax_id}</td><td>{r.contact_email || "—"}</td><td>{r.member_count}</td><td><span className={styles.status}>{r.status}</span></td><td onClick={(e)=>e.stopPropagation()}><select disabled={busy === `retailers:${r.id}`} value={r.status} onChange={(e) => changeStatus("retailers", r.id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activa</option><option value="suspended">Suspendida</option><option value="rejected">Rechazada</option></select></td></tr>)}</tbody></table></div></section>
+          <section className={styles.card} style={{marginTop:18}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",flexWrap:"wrap"}}>
+              <div><p className={styles.eyebrow}>Usuarios</p><h2>{selectedRetailer ? selectedRetailer.trade_name : "Selecciona una agencia"}</h2><p className={styles.helper}>{selectedRetailer ? `${selectedRetailer.legal_name} · ${selectedRetailer.tax_id}` : "La lista de usuarios aparecerá aquí."}</p></div>
+              {agencyCapacity ? <span className={styles.pending}>{agencyCapacity.active}/{agencyCapacity.limit} usuarios activos</span> : null}
+            </div>
+            {agencyMessage ? <p className={styles.helper}>{agencyMessage}</p> : null}
+            {selectedRetailer && !agencyMessage ? <div className={styles.tableWrap}><table><thead><tr><th>Usuario</th><th>Rol</th><th>Correo</th><th>Último inicio</th><th>Estado</th></tr></thead><tbody>{agencyMembers.map((m) => <tr key={m.account_id}><td><strong>{m.first_name} {m.last_name}</strong></td><td>{m.member_role === "admin" ? "Administrador" : "Counter"}</td><td>{m.email}</td><td>{m.last_login_at ? new Date(m.last_login_at).toLocaleString("es-PE") : "Nunca"}</td><td><span className={styles.status}>{m.display_status || m.status}</span></td></tr>)}</tbody></table>{agencyMembers.length===0?<p className={styles.helper}>Esta agencia no tiene usuarios registrados.</p>:null}</div> : null}
+          </section>
+        </> : null}
 
         {tab === "commissions" ? <>
           <section className={styles.card}><h2>Reglas globales</h2><p className={styles.helper}>Los cambios afectan nuevas comisiones y no recalculan operaciones históricas.</p><div className={styles.rateGrid}>{(["partner","sponsor","retailer"] as const).map((key) => <label key={key}><span>{key === "partner" ? "Partner directo" : key === "sponsor" ? "Sponsor directo" : "Agencia minorista"}</span><div><input min="0" max="100" step="0.1" type="number" value={rates[key]} onChange={(e) => setRates((v) => ({ ...v, [key]: Number(e.target.value) }))} /><b>%</b></div></label>)}</div><button className={styles.primary} disabled={busy === "rates"} onClick={saveRates}>{busy === "rates" ? "Guardando…" : "Guardar reglas"}</button></section>
