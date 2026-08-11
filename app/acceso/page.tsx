@@ -187,7 +187,7 @@ export default function AccessPage() {
             ) : (
               <div className={styles.loginOptions}>
                 <label className={styles.check}><input name="remember" type="checkbox" /><span>Recordarme</span></label>
-                <a href="mailto:soporte@rumbo.pe?subject=Recuperar%20acceso%20Rumbo">Olvidé mi contraseña</a>
+                <Link href="/olvide-contrasena">Olvidé mi contraseña</Link>
               </div>
             )}
 
