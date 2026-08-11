@@ -14,7 +14,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: RUMBO_API_URL
-        value: https://rumbo-api.onrender.com
+        value: https://rumbo-api-4twt.onrender.com
       - key: RUMBO_API_KEY
         fromService:
           name: rumbo-api
