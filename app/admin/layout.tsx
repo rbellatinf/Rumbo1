@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
@@ -30,7 +30,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   );
 }
 
-const navItem: React.CSSProperties = {
+const navItem: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 9,
