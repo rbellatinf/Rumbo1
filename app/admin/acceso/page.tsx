@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import styles from "./acceso.module.css";
@@ -8,6 +8,7 @@ import styles from "./acceso.module.css";
 export default function AdminAccessPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,7 +37,15 @@ export default function AdminAccessPage() {
       <p className={styles.lead}>Uso exclusivo para usuarios internos autorizados de Rumbo.</p>
       <form onSubmit={submit}>
         <label>Correo administrativo<input name="email" type="email" required autoComplete="email" /></label>
-        <label>Contraseña<input name="password" type="password" required minLength={10} autoComplete="current-password" /></label>
+        <label>Contraseña
+          <div className={styles.passwordField}>
+            <input name="password" type={showPassword ? "text" : "password"} required minLength={10} autoComplete="current-password" />
+            <button className={styles.eyeButton} type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
+              {showPassword ? <EyeOff /> : <Eye />}
+            </button>
+          </div>
+        </label>
+        <div className={styles.helpRow}><Link href="/olvide-contrasena?return=/admin/acceso">Olvidé mi contraseña</Link></div>
         {error ? <div className={styles.error}>{error}</div> : null}
         <button disabled={busy} type="submit">{busy ? <><LoaderCircle className={styles.spin}/> Ingresando…</> : "Ingresar al backoffice"}</button>
       </form>
