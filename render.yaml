@@ -15,6 +15,11 @@ services:
         value: production
       - key: RUMBO_API_URL
         value: https://rumbo-api.onrender.com
+      - key: RUMBO_API_KEY
+        fromService:
+          name: rumbo-api
+          type: web
+          envVarKey: RUMBO_API_KEY
       - key: RUMBO_DEMO_MODE
         value: "false"
       - key: SPREE_API_URL
@@ -45,6 +50,12 @@ services:
         sync: false
       - key: RUMBO_ADMIN_PASSWORD
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RUMBO_MAIL_FROM
+        sync: false
+      - key: RUMBO_PUBLIC_URL
+        value: https://rumbo-storefront.onrender.com
       - key: PGSSLMODE
         value: require
       - key: NODE_ENV
