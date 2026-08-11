@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 const clean=(v)=>String(v||"").trim();
 const sha256=(v)=>crypto.createHash("sha256").update(v).digest("hex");
 function tempPassword(){return `Rumbo#${crypto.randomBytes(5).toString("base64url")}9a`}
+function referralCode(first,last){const seed=`${first}-${last}`.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,18);return `RUMBO-${seed}-${crypto.randomBytes(2).toString("hex").toUpperCase()}`}
 
 export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
   async function requireInternalAdmin(req,res,next){
@@ -43,6 +44,13 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
       await client.query('COMMIT'); await audit(req.adminSession.email,'internal_user.created','account',rows[0].id,{email,role});
       res.status(201).json({user:{...rows[0],first_name:first,last_name:last,internal_role:role},credentials:{username:email,temporary_password:password,must_change_password:true}});
     }catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un usuario con ese correo.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el usuario Rumbo.'}})}finally{client.release()}
+  });
+
+  app.post('/api/admin/partners',requireAdmin,requireInternalAdmin,async(req,res)=>{
+    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),phone=clean(req.body.phone);
+    if(!email||!first||!last||!documentNumber||!['DNI','CE','PASSPORT','RUC'].includes(documentType)) return res.status(422).json({error:{message:'Completa correo, nombres, apellidos y documento.'}});
+    const password=tempPassword(),hash=await bcrypt.hash(password,12),referral=referralCode(first,last),client=await pool.connect();
+    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,'partner','active',true) RETURNING id,email,status`,[email,hash]);await client.query(`INSERT INTO rumbo_partner_profiles(account_id,first_name,last_name,document_type,document_number,phone,referral_code,terms_accepted_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())`,[rows[0].id,first,last,documentType,documentNumber,phone||null,referral]);await client.query('COMMIT');await audit(req.adminSession.email,'partner.created','partner',rows[0].id,{email,referral_code:referral});res.status(201).json({partner:{account_id:rows[0].id,email,first_name:first,last_name:last,document_type:documentType,document_number:documentNumber,phone,referral_code:referral,status:'active'},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un Partner con ese correo, documento o código.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el Partner.'}})}finally{client.release()}
   });
 
   app.post('/api/admin/agencies',requireAdmin,requireInternalAdmin,async(req,res)=>{
