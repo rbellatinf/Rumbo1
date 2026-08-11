@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useState } from "react";
 
@@ -29,6 +28,18 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
   },[isMain]);
 
   useEffect(()=>{if(!isMain||!adminReady)return;const requested=searchParams.get("tab"),label=requested?tabLabels[requested]:null;if(!label)return;const timer=window.setTimeout(()=>{const buttons=Array.from(document.querySelectorAll("main aside nav button")) as HTMLButtonElement[];buttons.find(b=>b.textContent?.trim().includes(label))?.click()},0);return()=>window.clearTimeout(timer)},[isMain,adminReady,searchParams]);
+
+  useEffect(()=>{
+    if(!isMain||!adminReady)return;
+    const nav=document.querySelector("main aside nav");
+    if(!nav)return;
+    const makeLink=(href:string,label:string,svg:string)=>{const a=document.createElement("a");a.href=href;a.className="rumbo-extra-nav";a.dataset.rumboExtra="true";a.innerHTML=`${svg}<span>${label}</span>`;return a};
+    const commissions=Array.from(nav.querySelectorAll("button")).find(b=>b.textContent?.includes("Comisiones"))||null;
+    if(!nav.querySelector('a[href="/admin/usuarios"]'))nav.insertBefore(makeLink("/admin/usuarios","Usuarios",'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>'),commissions);
+    if(!nav.querySelector('a[href="/admin/pricing"]'))nav.insertBefore(makeLink("/admin/pricing","Pricing",'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41 11 3.83V3H4v7h.83l9.58 9.59a2 2 0 0 0 2.82 0l3.36-3.36a2 2 0 0 0 0-2.82ZM7.5 7.5h.01"/></svg>'),commissions);
+    return()=>{nav.querySelectorAll('[data-rumbo-extra="true"]').forEach(el=>el.remove())};
+  },[isMain,adminReady]);
+
   useEffect(()=>{if(!isMain||!adminReady)return;const enhance=()=>{const spans=Array.from(document.querySelectorAll("main span")) as HTMLSpanElement[];for(const span of spans){const match=span.textContent?.trim().match(/^(\d+)\/(\d+) activos$/);if(!match)continue;const active=Number(match[1]),limit=Number(match[2]),section=span.closest("section"),sectionText=section?.textContent||"",totalMatch=sectionText.match(/(\d+) usuarios\s*·\s*5 por página/),total=totalMatch?Number(totalMatch[1]):active,inactive=Math.max(0,total-active),available=Math.max(0,limit-total);span.textContent=`${active} activos · ${inactive} inactivos · ${available} disponibles`;span.title=`Capacidad: ${total} de ${limit} usuarios creados`}for(const table of Array.from(document.querySelectorAll("main table"))){const headers=Array.from(table.querySelectorAll("thead th"));const idx=headers.findIndex(h=>h.textContent?.trim().toUpperCase()==="RUC");if(idx<0)continue;for(const row of Array.from(table.querySelectorAll("tbody tr"))){const cell=row.children.item(idx) as HTMLElement|null;if(cell){cell.classList.add("rumbo-ruc-link");cell.title="Ver detalle de la empresa"}}}};enhance();const observer=new MutationObserver(enhance);observer.observe(document.body,{subtree:true,childList:true,characterData:true});return()=>observer.disconnect()},[isMain,adminReady]);
 
   useEffect(()=>{const click=(event:MouseEvent)=>{const target=event.target as HTMLElement;const anchor=target.closest("a") as HTMLAnchorElement|null;if(anchor){const url=new URL(anchor.href,location.origin);if(url.pathname==="/admin/agencias/nueva"){event.preventDefault();setModal("agency");setError("");return}if(url.pathname==="/admin/agencias/personas/nueva"){event.preventDefault();const id=url.searchParams.get("retailer")||"";setRetailerId(id);setSelectedAgency(null);setModal("person");setError("");fetch("/api/admin/overview",{cache:"no-store"}).then(r=>r.json()).then(p=>{const agency=(p.retailers||[]).find((a:Agency)=>a.id===id);if(agency)setSelectedAgency(agency)}).catch(()=>{});return}if(url.pathname==="/admin/partners/nuevo"){event.preventDefault();setModal("partner");setError("");return}}
@@ -42,10 +53,9 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
   async function submitPerson(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/user-management",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"agency_person",retailer_id:retailerId,...Object.fromEntries(f.entries())})}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear la persona.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear la persona.")}finally{setBusy(false)}}
   async function submitPartner(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/partners",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f.entries()))}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear el Partner.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear el Partner.")}finally{setBusy(false)}}
 
-  const showChrome=!isMain||adminReady;
   return <div className={collapsed&&isMain?"rumbo-admin-collapsed":""}>
-    {showChrome?<div style={{display:"flex",gap:8,padding:"8px 22px",background:"#fff",borderBottom:"1px solid #e4e7ec",fontSize:12,flexWrap:"wrap"}}><Link href="/admin" style={navItem}>Backoffice</Link><Link href="/admin?tab=partners" style={navItem}>Partners</Link><Link href="/admin?tab=retailers" style={navItem}>Agencias</Link><Link href="/admin/usuarios" style={navItem}>Usuarios</Link><Link href="/admin/pricing" style={navItem}>Pricing</Link></div>:null}
-    {isMain&&adminReady?<button aria-label={collapsed?"Expandir menú":"Contraer menú"} title={collapsed?"Expandir menú":"Contraer menú"} onClick={()=>setCollapsed(v=>!v)} style={{position:"fixed",zIndex:60,top:143,left:collapsed?18:214,width:34,height:34,borderRadius:9,border:"1px solid #d0d5dd",background:"white",color:"#344054",fontSize:19,lineHeight:1,fontWeight:900,cursor:"pointer",boxShadow:"0 3px 10px rgba(16,34,63,.12)",transition:"left .2s ease"}}>☰</button>:null}
+    {isMain&&adminReady&&collapsed?<div className="rumbo-collapsed-r" aria-hidden="true">R<span>.</span></div>:null}
+    {isMain&&adminReady?<button aria-label={collapsed?"Expandir menú":"Contraer menú"} title={collapsed?"Expandir menú":"Contraer menú"} onClick={()=>setCollapsed(v=>!v)} className="rumbo-menu-toggle">☰</button>:null}
     <div style={isMain&&!adminReady?{visibility:"hidden",height:0,overflow:"hidden"}:undefined}>{children}</div>
     {modal?<div style={overlay} onMouseDown={e=>{if(e.target===e.currentTarget)closeModal()}}><div style={modalBox}>
       {modal==="person"&&selectedAgency?<div style={agencyBadge}><span style={{fontSize:10,color:"#667085",textTransform:"uppercase",letterSpacing:".08em",fontWeight:800}}>Agencia seleccionada</span><strong style={{display:"block",marginTop:2,fontSize:14,color:"#17233b"}}>{selectedAgency.trade_name}</strong><small style={{display:"block",marginTop:1,color:"#667085"}}>RUC {selectedAgency.tax_id}</small></div>:null}
@@ -55,7 +65,22 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
       {modal==="partner"?<><p style={eyebrow}>Partners</p><h2 style={title}>Nuevo partner</h2><p style={muted}>Crea su acceso y código de referido.</p>{credentials?<CredentialsPanel credentials={credentials} onDone={refreshBackoffice}/>:<form onSubmit={submitPartner} style={grid}><Field name="first_name" label="Nombres" required/><Field name="last_name" label="Apellidos" required/><Field name="email" label="Correo" type="email" required/><label style={fieldLabel}>Tipo documento<select name="document_type" defaultValue="DNI" style={input}><option>DNI</option><option>CE</option><option>PASSPORT</option><option>RUC</option></select></label><Field name="document_number" label="Nro. documento" required/><Field name="phone" label="Teléfono"/>{error?<p style={errorStyle}>{error}</p>:null}<button disabled={busy} style={primary}>{busy?"Creando…":"Crear partner"}</button></form>}</>:null}
       {modal==="agencyDetail"&&detail?<><p style={eyebrow}>Detalle de empresa</p><h2 style={title}>{detail.trade_name}</h2><p style={muted}>{detail.legal_name}</p><div style={detailGrid}><Detail label="RUC" value={detail.tax_id}/><Detail label="Estado" value={String(detail.status||"—")}/><Detail label="Contacto" value={String(detail.contact_email||"—")}/><Detail label="Teléfono" value={String(detail.phone||"—")}/><Detail label="Usuarios" value={String(detail.member_count??"—")}/><Detail label="Creada" value={detail.created_at?new Date(String(detail.created_at)).toLocaleDateString("es-PE"):"—"}/></div></>:null}
     </div></div>:null}
-    <style jsx global>{`.rumbo-ruc-link{color:#175cd3!important;text-decoration:underline!important;text-underline-offset:2px;cursor:pointer!important;font-weight:700}.rumbo-admin-collapsed main[class]{grid-template-columns:72px minmax(0,1fr)!important}.rumbo-admin-collapsed main[class]>aside:first-child{padding-left:10px!important;padding-right:10px!important;padding-top:64px!important}.rumbo-admin-collapsed main[class]>aside:first-child>a:first-child,.rumbo-admin-collapsed main[class]>aside:first-child>p,.rumbo-admin-collapsed main[class]>aside:first-child>a:last-child{display:none!important}.rumbo-admin-collapsed main[class]>aside:first-child nav button{justify-content:center!important;gap:0!important;padding-left:8px!important;padding-right:8px!important;font-size:0!important}.rumbo-admin-collapsed main[class]>aside:first-child nav button svg{width:20px!important;height:20px!important;margin:0!important}.rumbo-admin-collapsed main[class]>section{max-width:none!important}@media(max-width:980px){.rumbo-admin-collapsed main[class]{grid-template-columns:1fr!important}}`}</style>
+    <style jsx global>{`
+      .rumbo-ruc-link{color:#175cd3!important;text-decoration:underline!important;text-underline-offset:2px;cursor:pointer!important;font-weight:700}
+      .rumbo-menu-toggle{position:fixed;z-index:60;top:22px;left:214px;width:34px;height:34px;border-radius:9px;border:1px solid #d0d5dd;background:white;color:#344054;font-size:19px;line-height:1;font-weight:900;cursor:pointer;box-shadow:0 3px 10px rgba(16,34,63,.12);transition:left .2s ease,top .2s ease}
+      .rumbo-collapsed-r{position:fixed;z-index:61;top:14px;left:20px;width:32px;height:32px;display:grid;place-items:center;font-size:23px;font-weight:900;color:#10223f;letter-spacing:-.06em}.rumbo-collapsed-r span{color:#ff6b4a}
+      main aside nav .rumbo-extra-nav{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:10px;color:#667085;text-decoration:none;font-weight:700;box-sizing:border-box}
+      main aside nav .rumbo-extra-nav:hover{background:#f5f7fa;color:#10223f}
+      main aside nav .rumbo-extra-nav svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+      .rumbo-admin-collapsed .rumbo-menu-toggle{left:19px;top:54px}
+      .rumbo-admin-collapsed main[class]{grid-template-columns:72px minmax(0,1fr)!important}
+      .rumbo-admin-collapsed main[class]>aside:first-child{padding-left:10px!important;padding-right:10px!important;padding-top:104px!important}
+      .rumbo-admin-collapsed main[class]>aside:first-child>a:first-child,.rumbo-admin-collapsed main[class]>aside:first-child>p,.rumbo-admin-collapsed main[class]>aside:first-child>a:last-child{display:none!important}
+      .rumbo-admin-collapsed main[class]>aside:first-child nav button,.rumbo-admin-collapsed main[class]>aside:first-child nav .rumbo-extra-nav{justify-content:center!important;gap:0!important;padding-left:8px!important;padding-right:8px!important;font-size:0!important}
+      .rumbo-admin-collapsed main[class]>aside:first-child nav button svg,.rumbo-admin-collapsed main[class]>aside:first-child nav .rumbo-extra-nav svg{width:20px!important;height:20px!important;margin:0!important}
+      .rumbo-admin-collapsed main[class]>section{max-width:none!important}
+      @media(max-width:980px){.rumbo-admin-collapsed main[class]{grid-template-columns:1fr!important}.rumbo-menu-toggle,.rumbo-collapsed-r{display:none!important}}
+    `}</style>
   </div>
 }
 
@@ -63,7 +88,6 @@ function Field({name,label,type="text",required=false,defaultValue,wide=false}:{
 function Detail({label,value}:{label:string;value:string}){return <div style={{padding:"10px 12px",border:"1px solid #e4e7ec",borderRadius:9,background:"#f8fafc"}}><small style={{display:"block",color:"#667085"}}>{label}</small><strong>{value}</strong></div>}
 function CredentialsPanel({credentials,onDone}:{credentials:Credentials;onDone:()=>void}){return <div><p style={{...muted,marginTop:12}}>Guarda estas credenciales. La contraseña es temporal.</p><div style={{background:"#f8fafc",border:"1px solid #e4e7ec",borderRadius:10,padding:14,marginTop:12}}><small>Usuario</small><strong style={{display:"block",fontSize:17}}>{credentials.username}</strong><small style={{display:"block",marginTop:10}}>Contraseña temporal</small><strong style={{display:"block",fontSize:20}}>{credentials.temporary_password}</strong></div><button onClick={onDone} style={primary}>Entendido</button></div>}
 
-const navItem:CSSProperties={padding:"6px 10px",borderRadius:7,color:"#475467",textDecoration:"none",fontWeight:700,background:"#f7f8fa"};
 const overlay:CSSProperties={position:"fixed",inset:0,zIndex:2000,background:"rgba(15,23,42,.62)",display:"grid",placeItems:"center",padding:20,overflowY:"auto"};
 const modalBox:CSSProperties={position:"relative",width:"min(820px,100%)",maxHeight:"calc(100vh - 40px)",overflowY:"auto",background:"white",borderRadius:16,padding:22,boxShadow:"0 28px 80px rgba(0,0,0,.3)"};
 const closeButton:CSSProperties={position:"absolute",right:14,top:10,border:0,background:"transparent",fontSize:28,cursor:"pointer",color:"#667085"};
