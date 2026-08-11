@@ -16,6 +16,7 @@ const migrations = [
   "072_rumbo_catalog_commercial_rules.sql",
   "080_rumbo_native_bookings.sql",
   "090_rumbo_retailer_users.sql",
+  "091_rumbo_test_accounts.sql",
 ];
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
