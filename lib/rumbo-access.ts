@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 export const RUMBO_SESSION_COOKIE = "rumbo_session";
-export const DEFAULT_RUMBO_API_URL = "https://rumbo-api.onrender.com";
+export const DEFAULT_RUMBO_API_URL = "https://rumbo-api-4twt.onrender.com";
 
 export type AccessProvider = {
   kind: "rumbo" | "spree";
