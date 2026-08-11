@@ -23,6 +23,12 @@ const money = (amount: number, currency: string) => new Intl.NumberFormat("es-PE
 const date = (value: string) => new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const shortDate = (value?: string) => value ? new Intl.DateTimeFormat("es-PE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "—";
 
+const gridTable: React.CSSProperties = { width:"100%", borderCollapse:"collapse", tableLayout:"fixed", fontSize:13 };
+const gridTh: React.CSSProperties = { textAlign:"left", padding:"7px 9px", border:"1px solid #dfe4ea", background:"#eef2f5", color:"#536273", fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:.25 };
+const gridTd: React.CSSProperties = { padding:"6px 9px", border:"1px solid #e3e7eb", verticalAlign:"middle", lineHeight:1.2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" };
+const pager: React.CSSProperties = { display:"flex", justifyContent:"flex-end", alignItems:"center", gap:8, marginTop:9, fontSize:12, color:"#687587" };
+const pagerButton: React.CSSProperties = { border:"1px solid #ccd4dc", background:"white", borderRadius:5, padding:"5px 9px", fontWeight:700, cursor:"pointer" };
+
 export default function AdminPage() {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [tab, setTab] = useState<Tab>("summary");
@@ -34,6 +40,8 @@ export default function AdminPage() {
   const [agencyMembers, setAgencyMembers] = useState<AgencyMember[]>([]);
   const [agencyCapacity, setAgencyCapacity] = useState<{ active:number; total:number; limit:number } | null>(null);
   const [agencyMessage, setAgencyMessage] = useState("");
+  const [agencyPage, setAgencyPage] = useState(1);
+  const [userPage, setUserPage] = useState(1);
 
   async function load() {
     const response = await fetch("/api/admin/overview", { cache: "no-store" });
@@ -53,6 +61,7 @@ export default function AdminPage() {
     setAgencyMembers([]);
     setAgencyCapacity(null);
     setAgencyMessage("Cargando usuarios…");
+    setUserPage(1);
     try {
       const response = await fetch(`/api/admin/agencies/${retailer.id}/users`, { cache: "no-store" });
       const text = await response.text();
@@ -95,6 +104,13 @@ export default function AdminPage() {
     if (!q) return data.reservations;
     return data.reservations.filter((r) => [r.reference, r.product_name, r.contact_name, r.contact_email, r.referral_code, r.origin_iata, r.destination_iata].some((v) => String(v || "").toLowerCase().includes(q)));
   }, [data, search]);
+
+  const agenciesPerPage = 10;
+  const agencyPages = Math.max(1, Math.ceil((data?.retailers.length || 0) / agenciesPerPage));
+  const pagedAgencies = data?.retailers.slice((agencyPage - 1) * agenciesPerPage, agencyPage * agenciesPerPage) || [];
+  const usersPerPage = 5;
+  const userPages = Math.max(1, Math.ceil(agencyMembers.length / usersPerPage));
+  const pagedUsers = agencyMembers.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
 
   if (!data) return <main className={styles.loading}><LoaderCircle className={styles.spin} /> {error || "Cargando administración de Rumbo…"}</main>;
 
@@ -142,17 +158,40 @@ export default function AdminPage() {
 
         {tab === "partners" ? <section className={styles.card}><h2>Partners</h2><p className={styles.helper}>Estado de alta, identidad, código de referido y red directa.</p><div className={styles.tableWrap}><table><thead><tr><th>Partner</th><th>Documento</th><th>Código</th><th>Red</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.partners.map((p) => <tr key={p.account_id}><td><strong>{p.first_name} {p.last_name}</strong><small>{p.email}</small></td><td>{p.document_type} {p.document_number}</td><td><code>{p.referral_code}</code></td><td>{p.direct_referrals}</td><td><span className={styles.status}>{p.status}</span></td><td><select disabled={busy === `partners:${p.account_id}`} value={p.status} onChange={(e) => changeStatus("partners", p.account_id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activo</option><option value="blocked">Bloqueado</option><option value="disabled">Deshabilitado</option></select></td></tr>)}</tbody></table></div></section> : null}
 
-        {tab === "retailers" ? <>
-          <section className={styles.card}><h2>Agencias minoristas</h2><p className={styles.helper}>Haz clic en una agencia para ver debajo sus usuarios.</p><div className={styles.tableWrap}><table><thead><tr><th>Agencia</th><th>RUC</th><th>Contacto</th><th>Usuarios</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{data.retailers.map((r) => <tr key={r.id} onClick={() => selectRetailer(r)} style={{cursor:"pointer",background:selectedRetailer?.id===r.id?"#eef5fb":"transparent"}}><td><strong>{r.trade_name}</strong><small>{r.legal_name}</small></td><td>{r.tax_id}</td><td>{r.contact_email || "—"}</td><td>{r.member_count}</td><td><span className={styles.status}>{r.status}</span></td><td onClick={(e)=>e.stopPropagation()}><select disabled={busy === `retailers:${r.id}`} value={r.status} onChange={(e) => changeStatus("retailers", r.id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activa</option><option value="suspended">Suspendida</option><option value="rejected">Rechazada</option></select></td></tr>)}</tbody></table></div></section>
-          <section className={styles.card} style={{marginTop:18}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",flexWrap:"wrap"}}>
-              <div><p className={styles.eyebrow}>Usuarios</p><h2>{selectedRetailer ? selectedRetailer.trade_name : "Selecciona una agencia"}</h2><p className={styles.helper}>{selectedRetailer ? `${selectedRetailer.legal_name} · ${selectedRetailer.tax_id}` : "La lista de usuarios aparecerá aquí."}</p></div>
-              {agencyCapacity ? <span className={styles.pending}>{agencyCapacity.active}/{agencyCapacity.limit} usuarios activos</span> : null}
+        {tab === "retailers" ? <div style={{display:"flex", flexDirection:"column", minHeight:"calc(100vh - 190px)"}}>
+          <section className={styles.card} style={{padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"end",gap:12,marginBottom:9}}>
+              <div><h2 style={{marginBottom:2}}>Agencias minoristas</h2><p className={styles.helper} style={{margin:0}}>Vista compacta · 10 agencias por página. Haz clic en una fila.</p></div>
+              <span style={{fontSize:12,color:"#6d7887"}}>Página {agencyPage} de {agencyPages}</span>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={gridTable}>
+                <thead><tr><th style={{...gridTh,width:"24%"}}>Agencia</th><th style={{...gridTh,width:"17%"}}>RUC</th><th style={{...gridTh,width:"25%"}}>Contacto</th><th style={{...gridTh,width:"10%"}}>Usuarios</th><th style={{...gridTh,width:"11%"}}>Estado</th><th style={{...gridTh,width:"13%"}}>Acción</th></tr></thead>
+                <tbody>{pagedAgencies.map((r) => <tr key={r.id} onClick={() => selectRetailer(r)} style={{cursor:"pointer",background:selectedRetailer?.id===r.id?"#dfeef9":"white"}}>
+                  <td style={gridTd} title={`${r.trade_name} / ${r.legal_name}`}><strong>{r.trade_name}</strong><span style={{display:"block",fontSize:11,color:"#778394",marginTop:2}}>{r.legal_name}</span></td>
+                  <td style={gridTd}>{r.tax_id}</td>
+                  <td style={gridTd} title={r.contact_email || ""}>{r.contact_email || "—"}</td>
+                  <td style={gridTd}>{r.member_count}</td>
+                  <td style={gridTd}><span className={styles.status}>{r.status}</span></td>
+                  <td style={gridTd} onClick={(e)=>e.stopPropagation()}><select style={{width:"100%",fontSize:12,padding:"4px 5px"}} disabled={busy === `retailers:${r.id}`} value={r.status} onChange={(e) => changeStatus("retailers", r.id, e.target.value)}><option value="pending">Pendiente</option><option value="active">Activa</option><option value="suspended">Suspendida</option><option value="rejected">Rechazada</option></select></td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div style={pager}><span>{data.retailers.length} agencias</span><button style={pagerButton} disabled={agencyPage<=1} onClick={()=>setAgencyPage((p)=>Math.max(1,p-1))}>‹ Anterior</button><button style={pagerButton} disabled={agencyPage>=agencyPages} onClick={()=>setAgencyPage((p)=>Math.min(agencyPages,p+1))}>Siguiente ›</button></div>
+          </section>
+
+          <section className={styles.card} style={{marginTop:"auto",padding:16,minHeight:245}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-end",flexWrap:"wrap",marginBottom:9}}>
+              <div><p className={styles.eyebrow} style={{marginBottom:3}}>Usuarios</p><h2 style={{margin:"0 0 2px"}}>{selectedRetailer ? selectedRetailer.trade_name : "Selecciona una agencia"}</h2><p className={styles.helper} style={{margin:0}}>{selectedRetailer ? `${selectedRetailer.legal_name} · ${selectedRetailer.tax_id}` : "La lista de usuarios aparecerá aquí."}</p></div>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>{agencyCapacity ? <span className={styles.pending}>{agencyCapacity.active}/{agencyCapacity.limit} activos</span> : null}{selectedRetailer ? <span style={{fontSize:12,color:"#6d7887"}}>Página {userPage} de {userPages}</span> : null}</div>
             </div>
             {agencyMessage ? <p className={styles.helper}>{agencyMessage}</p> : null}
-            {selectedRetailer && !agencyMessage ? <div className={styles.tableWrap}><table><thead><tr><th>Usuario</th><th>Rol</th><th>Correo</th><th>Último inicio</th><th>Estado</th></tr></thead><tbody>{agencyMembers.map((m) => <tr key={m.account_id}><td><strong>{m.first_name} {m.last_name}</strong></td><td>{m.member_role === "admin" ? "Administrador" : "Counter"}</td><td>{m.email}</td><td>{m.last_login_at ? new Date(m.last_login_at).toLocaleString("es-PE") : "Nunca"}</td><td><span className={styles.status}>{m.display_status || m.status}</span></td></tr>)}</tbody></table>{agencyMembers.length===0?<p className={styles.helper}>Esta agencia no tiene usuarios registrados.</p>:null}</div> : null}
+            {selectedRetailer && !agencyMessage ? <>
+              <div style={{overflowX:"auto"}}><table style={gridTable}><thead><tr><th style={{...gridTh,width:"24%"}}>Usuario</th><th style={{...gridTh,width:"16%"}}>Rol</th><th style={{...gridTh,width:"29%"}}>Correo</th><th style={{...gridTh,width:"20%"}}>Último inicio</th><th style={{...gridTh,width:"11%"}}>Estado</th></tr></thead><tbody>{pagedUsers.map((m) => <tr key={m.account_id}><td style={gridTd}><strong>{m.first_name} {m.last_name}</strong></td><td style={gridTd}>{m.member_role === "admin" ? "Administrador" : "Counter"}</td><td style={gridTd} title={m.email}>{m.email}</td><td style={gridTd}>{m.last_login_at ? new Date(m.last_login_at).toLocaleString("es-PE") : "Nunca"}</td><td style={gridTd}><span className={styles.status}>{m.display_status || m.status}</span></td></tr>)}</tbody></table></div>
+              {agencyMembers.length===0?<p className={styles.helper}>Esta agencia no tiene usuarios registrados.</p>:<div style={pager}><span>{agencyMembers.length} usuarios · 5 por página</span><button style={pagerButton} disabled={userPage<=1} onClick={()=>setUserPage((p)=>Math.max(1,p-1))}>‹ Anterior</button><button style={pagerButton} disabled={userPage>=userPages} onClick={()=>setUserPage((p)=>Math.min(userPages,p+1))}>Siguiente ›</button></div>}
+            </> : null}
           </section>
-        </> : null}
+        </div> : null}
 
         {tab === "commissions" ? <>
           <section className={styles.card}><h2>Reglas globales</h2><p className={styles.helper}>Los cambios afectan nuevas comisiones y no recalculan operaciones históricas.</p><div className={styles.rateGrid}>{(["partner","sponsor","retailer"] as const).map((key) => <label key={key}><span>{key === "partner" ? "Partner directo" : key === "sponsor" ? "Sponsor directo" : "Agencia minorista"}</span><div><input min="0" max="100" step="0.1" type="number" value={rates[key]} onChange={(e) => setRates((v) => ({ ...v, [key]: Number(e.target.value) }))} /><b>%</b></div></label>)}</div><button className={styles.primary} disabled={busy === "rates"} onClick={saveRates}>{busy === "rates" ? "Guardando…" : "Guardar reglas"}</button></section>
