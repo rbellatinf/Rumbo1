@@ -22,11 +22,11 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     return rows[0]?.member_role==='admin'?rows[0]:null;
   }
 
-  async function createAgencyPerson({retailerId,email,first,last,role,createdBy,actor,res}){
+  async function createAgencyPerson({retailerId,email,first,last,role,documentType,documentNumber,dateOfBirth,phone,createdBy,actor,res}){
     const agency=(await pool.query(`SELECT id,user_limit FROM rumbo_retailers WHERE id=$1`,[retailerId])).rows[0];if(!agency)return res.status(404).json({error:{message:'Agencia no encontrada.'}});
     const count=Number((await pool.query(`SELECT count(*)::int n FROM rumbo_retailer_members WHERE retailer_id=$1`,[retailerId])).rows[0]?.n||0);if(count>=agency.user_limit)return res.status(409).json({error:{message:'La agencia alcanzó su límite de usuarios.'}});
     const password=tempPassword(),hash=await bcrypt.hash(password,12),accountRole=role==='admin'?'retailer_owner':'retailer_agent',client=await pool.connect();
-    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,$3,'active',true) RETURNING id,email,status`,[email,hash,accountRole]);await client.query(`INSERT INTO rumbo_retailer_members(retailer_id,account_id,member_role,first_name,last_name,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6)`,[retailerId,rows[0].id,role,first,last,createdBy]);await client.query('COMMIT');await audit(actor,'retailer.person_created','retailer_user',rows[0].id,{retailer_id:retailerId,email,role});return res.status(201).json({person:{...rows[0],first_name:first,last_name:last,member_role:role},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe una persona con ese correo.'}});console.error(e);return res.status(500).json({error:{message:'No pudimos crear la persona.'}})}finally{client.release()}
+    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,$3,'active',true) RETURNING id,email,status`,[email,hash,accountRole]);await client.query(`INSERT INTO rumbo_retailer_members(retailer_id,account_id,member_role,first_name,last_name,phone,document_type,document_number,date_of_birth,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::date,$10)`,[retailerId,rows[0].id,role,first,last,phone||null,documentType||'DNI',documentNumber||null,dateOfBirth||'',createdBy]);await client.query('COMMIT');await audit(actor,'retailer.person_created','retailer_user',rows[0].id,{retailer_id:retailerId,email,role});return res.status(201).json({person:{...rows[0],first_name:first,last_name:last,member_role:role,document_type:documentType||'DNI',document_number:documentNumber||null,date_of_birth:dateOfBirth||null,phone:phone||null},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe una persona con ese correo o documento.'}});console.error(e);return res.status(500).json({error:{message:'No pudimos crear la persona.'}})}finally{client.release()}
   }
 
   app.get('/api/admin/internal-users',requireAdmin,async(_req,res)=>{
@@ -34,23 +34,33 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     res.json({users:rows});
   });
 
+  app.get('/api/admin/person-detail',requireAdmin,async(req,res)=>{
+    const type=clean(req.query.type),id=clean(req.query.id);
+    if(!id||!['partner','internal','retailer'].includes(type))return res.status(422).json({error:{message:'Tipo e identificador son obligatorios.'}});
+    let query='';
+    if(type==='partner') query=`SELECT p.account_id,p.first_name,p.last_name,p.document_type,p.document_number,p.date_of_birth,p.phone,p.referral_code,p.public_slug,p.commission_rate,p.network_commission_rate,p.created_at,a.email,a.status,a.last_login_at FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.account_id=$1 LIMIT 1`;
+    if(type==='internal') query=`SELECT i.account_id,i.first_name,i.last_name,i.internal_role,i.job_title,i.phone,i.document_type,i.document_number,i.date_of_birth,i.created_at,a.email,a.status,a.last_login_at FROM rumbo_internal_members i JOIN rumbo_accounts a ON a.id=i.account_id WHERE i.account_id=$1 LIMIT 1`;
+    if(type==='retailer') query=`SELECT m.account_id,m.retailer_id,m.first_name,m.last_name,m.member_role,m.phone,m.document_type,m.document_number,m.date_of_birth,m.created_at,a.email,a.status,a.last_login_at,r.trade_name,r.legal_name,r.tax_id FROM rumbo_retailer_members m JOIN rumbo_accounts a ON a.id=m.account_id JOIN rumbo_retailers r ON r.id=m.retailer_id WHERE m.account_id=$1 LIMIT 1`;
+    const {rows}=await pool.query(query,[id]); if(!rows[0])return res.status(404).json({error:{message:'Persona no encontrada.'}});res.json({person:{...rows[0],person_type:type}});
+  });
+
   app.post('/api/admin/internal-users',requireAdmin,requireInternalAdmin,async(req,res)=>{
-    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter';
-    if(!email||!first||!last||!['admin','counter'].includes(role)) return res.status(422).json({error:{message:'Completa correo, nombres, apellidos y rol.'}});
+    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter',documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),dateOfBirth=clean(req.body.date_of_birth),phone=clean(req.body.phone);
+    if(!email||!first||!last||!documentNumber||!['admin','counter'].includes(role)||!['DNI','CE','PASSPORT'].includes(documentType)) return res.status(422).json({error:{message:'Completa correo, nombres, apellidos, rol y documento.'}});
     const password=tempPassword(),hash=await bcrypt.hash(password,12),client=await pool.connect();
     try{await client.query('BEGIN');
       const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,'wholesaler_admin','active',true) RETURNING id,email,status`,[email,hash]);
-      await client.query(`INSERT INTO rumbo_internal_members(account_id,first_name,last_name,internal_role,phone,job_title,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6,$7)`,[rows[0].id,first,last,role,clean(req.body.phone)||null,clean(req.body.job_title)||null,req.adminSession.account_id]);
+      await client.query(`INSERT INTO rumbo_internal_members(account_id,first_name,last_name,internal_role,phone,job_title,document_type,document_number,date_of_birth,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::date,$10)`,[rows[0].id,first,last,role,phone||null,clean(req.body.job_title)||null,documentType,documentNumber,dateOfBirth||'',req.adminSession.account_id]);
       await client.query('COMMIT'); await audit(req.adminSession.email,'internal_user.created','account',rows[0].id,{email,role});
-      res.status(201).json({user:{...rows[0],first_name:first,last_name:last,internal_role:role},credentials:{username:email,temporary_password:password,must_change_password:true}});
-    }catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un usuario con ese correo.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el usuario Rumbo.'}})}finally{client.release()}
+      res.status(201).json({user:{...rows[0],first_name:first,last_name:last,internal_role:role,document_type:documentType,document_number:documentNumber,date_of_birth:dateOfBirth||null,phone:phone||null},credentials:{username:email,temporary_password:password,must_change_password:true}});
+    }catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un usuario con ese correo o documento.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el usuario Rumbo.'}})}finally{client.release()}
   });
 
   app.post('/api/admin/partners',requireAdmin,requireInternalAdmin,async(req,res)=>{
-    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),phone=clean(req.body.phone);
+    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),phone=clean(req.body.phone),dateOfBirth=clean(req.body.date_of_birth);
     if(!email||!first||!last||!documentNumber||!['DNI','CE','PASSPORT','RUC'].includes(documentType)) return res.status(422).json({error:{message:'Completa correo, nombres, apellidos y documento.'}});
     const password=tempPassword(),hash=await bcrypt.hash(password,12),referral=referralCode(first,last),client=await pool.connect();
-    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,'partner','active',true) RETURNING id,email,status`,[email,hash]);await client.query(`INSERT INTO rumbo_partner_profiles(account_id,first_name,last_name,document_type,document_number,phone,referral_code,terms_accepted_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())`,[rows[0].id,first,last,documentType,documentNumber,phone||null,referral]);await client.query('COMMIT');await audit(req.adminSession.email,'partner.created','partner',rows[0].id,{email,referral_code:referral});res.status(201).json({partner:{account_id:rows[0].id,email,first_name:first,last_name:last,document_type:documentType,document_number:documentNumber,phone,referral_code:referral,status:'active'},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un Partner con ese correo, documento o código.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el Partner.'}})}finally{client.release()}
+    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,'partner','active',true) RETURNING id,email,status`,[email,hash]);await client.query(`INSERT INTO rumbo_partner_profiles(account_id,first_name,last_name,document_type,document_number,date_of_birth,phone,referral_code,terms_accepted_at) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::date,$7,$8,now())`,[rows[0].id,first,last,documentType,documentNumber,dateOfBirth||'',phone||null,referral]);await client.query('COMMIT');await audit(req.adminSession.email,'partner.created','partner',rows[0].id,{email,referral_code:referral});res.status(201).json({partner:{account_id:rows[0].id,email,first_name:first,last_name:last,document_type:documentType,document_number:documentNumber,date_of_birth:dateOfBirth||null,phone,referral_code:referral,status:'active'},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe un Partner con ese correo, documento o código.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear el Partner.'}})}finally{client.release()}
   });
 
   app.post('/api/admin/agencies',requireAdmin,requireInternalAdmin,async(req,res)=>{
@@ -60,15 +70,15 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
   });
 
   app.post('/api/admin/agency-people',requireAdmin,requireInternalAdmin,async(req,res)=>{
-    const retailerId=clean(req.body.retailer_id),email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter';
-    if(!retailerId||!email||!first||!last||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Agencia, correo, nombres, apellidos y rol son obligatorios.'}});
-    return createAgencyPerson({retailerId,email,first,last,role,createdBy:req.adminSession.account_id,actor:req.adminSession.email,res});
+    const retailerId=clean(req.body.retailer_id),email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter',documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),dateOfBirth=clean(req.body.date_of_birth),phone=clean(req.body.phone);
+    if(!retailerId||!email||!first||!last||!documentNumber||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Agencia, correo, nombres, apellidos, documento y rol son obligatorios.'}});
+    return createAgencyPerson({retailerId,email,first,last,role,documentType,documentNumber,dateOfBirth,phone,createdBy:req.adminSession.account_id,actor:req.adminSession.email,res});
   });
 
   app.post('/api/retailer-admin/people',async(req,res)=>{
     const session=await retailerAdminFromRequest(req);if(!session)return res.status(403).json({error:{message:'Solo un Administrador de la agencia puede crear personas.'}});
-    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter';
-    if(!email||!first||!last||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Correo, nombres, apellidos y rol son obligatorios.'}});
-    return createAgencyPerson({retailerId:session.retailer_id,email,first,last,role,createdBy:session.account_id,actor:session.email,res});
+    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter',documentType=clean(req.body.document_type)||'DNI',documentNumber=clean(req.body.document_number),dateOfBirth=clean(req.body.date_of_birth),phone=clean(req.body.phone);
+    if(!email||!first||!last||!documentNumber||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Correo, nombres, apellidos, documento y rol son obligatorios.'}});
+    return createAgencyPerson({retailerId:session.retailer_id,email,first,last,role,documentType,documentNumber,dateOfBirth,phone,createdBy:session.account_id,actor:session.email,res});
   });
 }
