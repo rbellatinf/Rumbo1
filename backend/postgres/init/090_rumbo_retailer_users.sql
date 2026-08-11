@@ -20,6 +20,25 @@ ALTER TABLE rumbo_retailer_members
   ADD CONSTRAINT rumbo_retailer_members_member_role_check
   CHECK (member_role IN ('admin', 'counter'));
 
+-- Compatibilidad durante la transición: el flujo histórico todavía puede intentar
+-- insertar owner/agent. PostgreSQL los transforma antes de validar la restricción.
+CREATE OR REPLACE FUNCTION rumbo_normalize_retailer_member_role()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.member_role IN ('owner', 'manager', 'finance') THEN NEW.member_role := 'admin';
+  ELSIF NEW.member_role = 'agent' THEN NEW.member_role := 'counter';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS rumbo_retailer_member_role_normalize ON rumbo_retailer_members;
+CREATE TRIGGER rumbo_retailer_member_role_normalize
+BEFORE INSERT OR UPDATE OF member_role ON rumbo_retailer_members
+FOR EACH ROW EXECUTE FUNCTION rumbo_normalize_retailer_member_role();
+
 ALTER TABLE rumbo_retailer_members
   ADD COLUMN IF NOT EXISTS created_by_account_id uuid REFERENCES rumbo_accounts(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS disabled_at timestamptz,
