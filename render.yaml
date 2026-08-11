@@ -16,7 +16,7 @@ services:
       - key: RUMBO_API_URL
         value: https://rumbo-api.onrender.com
       - key: RUMBO_DEMO_MODE
-        value: "true"
+        value: "false"
       - key: SPREE_API_URL
         fromService:
           name: rumbo1-spree
@@ -40,7 +40,7 @@ services:
       - key: RUMBO_API_KEY
         generateValue: true
       - key: RUMBO_DEMO_MODE
-        value: "true"
+        value: "false"
       - key: RUMBO_ADMIN_EMAIL
         sync: false
       - key: RUMBO_ADMIN_PASSWORD
