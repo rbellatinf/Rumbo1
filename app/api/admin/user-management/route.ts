@@ -13,10 +13,13 @@ export async function GET(request:NextRequest){
   const {provider,token}=config(request);
   if(!provider||provider.kind!=="rumbo") return noStoreJson({message:"Rumbo API no está conectada."},503);
   if(!token&&!demoMode()) return noStoreJson({message:"No hay una sesión administrativa activa."},401);
+  const type=request.nextUrl.searchParams.get("type");
+  const id=request.nextUrl.searchParams.get("id");
+  const path=type&&id?`/api/admin/person-detail?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`:"/api/admin/internal-users";
   try{
-    const upstream=await fetch(`${provider.apiUrl}/api/admin/internal-users`,{headers:providerHeaders(provider,{token,demoRole:"wholesaler_admin"}),cache:"no-store"});
+    const upstream=await fetch(`${provider.apiUrl}${path}`,{headers:providerHeaders(provider,{token,demoRole:"wholesaler_admin"}),cache:"no-store"});
     const payload=await parseJson(upstream);
-    if(!upstream.ok) return noStoreJson({message:backendMessage(payload,"No pudimos cargar los usuarios Rumbo.")},upstream.status||502);
+    if(!upstream.ok) return noStoreJson({message:backendMessage(payload,type&&id?"No pudimos cargar el detalle de la persona.":"No pudimos cargar los usuarios Rumbo.")},upstream.status||502);
     return noStoreJson(payload);
   }catch{return noStoreJson({message:"Rumbo API no respondió."},502)}
 }
