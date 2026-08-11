@@ -2,85 +2,65 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
-const tabLabels: Record<string,string> = {
-  summary: "Resumen",
-  reservations: "Reservas",
-  partners: "Partners",
-  retailers: "Agencias",
-  commissions: "Comisiones",
-  audit: "Auditoría",
-};
+const tabLabels:Record<string,string>={summary:"Resumen",reservations:"Reservas",partners:"Partners",retailers:"Agencias",commissions:"Comisiones",audit:"Auditoría"};
+type ModalKind="agency"|"person"|"partner"|"agencyDetail"|null;
+type Agency={id:string;trade_name:string;legal_name:string;tax_id:string;contact_email?:string;phone?:string;status?:string;member_count?:number;[key:string]:unknown};
+
+type Credentials={username:string;temporary_password:string};
 
 export default function AdminLayoutClient({children}:{children:ReactNode}){
-  const pathname=usePathname();
-  const searchParams=useSearchParams();
-  const [collapsed,setCollapsed]=useState(false);
+  const pathname=usePathname(),searchParams=useSearchParams();
+  const [collapsed,setCollapsed]=useState(false),[modal,setModal]=useState<ModalKind>(null),[retailerId,setRetailerId]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[credentials,setCredentials]=useState<Credentials|null>(null),[detail,setDetail]=useState<Agency|null>(null);
   const isMain=pathname==="/admin";
 
-  useEffect(()=>{
-    if(!isMain)return;
-    const requested=searchParams.get("tab");
-    const label=requested?tabLabels[requested]:null;
-    if(!label)return;
-    const timer=window.setTimeout(()=>{
-      const buttons=Array.from(document.querySelectorAll("main aside nav button")) as HTMLButtonElement[];
-      const target=buttons.find(button=>button.textContent?.trim().includes(label));
-      target?.click();
-    },0);
-    return()=>window.clearTimeout(timer);
-  },[isMain,searchParams]);
+  useEffect(()=>{if(!isMain)return;const requested=searchParams.get("tab"),label=requested?tabLabels[requested]:null;if(!label)return;const timer=window.setTimeout(()=>{const buttons=Array.from(document.querySelectorAll("main aside nav button")) as HTMLButtonElement[];buttons.find(b=>b.textContent?.trim().includes(label))?.click()},0);return()=>window.clearTimeout(timer)},[isMain,searchParams]);
 
-  useEffect(()=>{
-    if(!isMain)return;
-    const expandCapacity=()=>{
-      const spans=Array.from(document.querySelectorAll("main span")) as HTMLSpanElement[];
-      for(const span of spans){
-        const match=span.textContent?.trim().match(/^(\d+)\/(\d+) activos$/);
-        if(!match)continue;
-        const active=Number(match[1]);
-        const limit=Number(match[2]);
-        const section=span.closest("section");
-        const sectionText=section?.textContent||"";
-        const totalMatch=sectionText.match(/(\d+) usuarios\s*·\s*5 por página/);
-        const total=totalMatch?Number(totalMatch[1]):active;
-        const inactive=Math.max(0,total-active);
-        const available=Math.max(0,limit-total);
-        span.textContent=`${active} activos · ${inactive} inactivos · ${available} disponibles`;
-        span.title=`Capacidad: ${total} de ${limit} usuarios creados`;
-      }
-    };
-    expandCapacity();
-    const observer=new MutationObserver(expandCapacity);
-    observer.observe(document.body,{subtree:true,childList:true,characterData:true});
-    return()=>observer.disconnect();
-  },[isMain]);
+  useEffect(()=>{if(!isMain)return;const enhance=()=>{
+    const spans=Array.from(document.querySelectorAll("main span")) as HTMLSpanElement[];
+    for(const span of spans){const match=span.textContent?.trim().match(/^(\d+)\/(\d+) activos$/);if(!match)continue;const active=Number(match[1]),limit=Number(match[2]),section=span.closest("section"),sectionText=section?.textContent||"",totalMatch=sectionText.match(/(\d+) usuarios\s*·\s*5 por página/),total=totalMatch?Number(totalMatch[1]):active,inactive=Math.max(0,total-active),available=Math.max(0,limit-total);span.textContent=`${active} activos · ${inactive} inactivos · ${available} disponibles`;span.title=`Capacidad: ${total} de ${limit} usuarios creados`}
+    for(const table of Array.from(document.querySelectorAll("main table"))){const headers=Array.from(table.querySelectorAll("thead th"));const idx=headers.findIndex(h=>h.textContent?.trim().toUpperCase()==="RUC");if(idx<0)continue;for(const row of Array.from(table.querySelectorAll("tbody tr"))){const cell=row.children.item(idx) as HTMLElement|null;if(cell){cell.classList.add("rumbo-ruc-link");cell.title="Ver detalle de la empresa"}}}
+  };enhance();const observer=new MutationObserver(enhance);observer.observe(document.body,{subtree:true,childList:true,characterData:true});return()=>observer.disconnect()},[isMain]);
+
+  useEffect(()=>{const click=(event:MouseEvent)=>{const target=event.target as HTMLElement;const anchor=target.closest("a") as HTMLAnchorElement|null;if(anchor){const url=new URL(anchor.href,location.origin);if(url.pathname==="/admin/agencias/nueva"){event.preventDefault();setModal("agency");setError("");return}if(url.pathname==="/admin/agencias/personas/nueva"){event.preventDefault();setRetailerId(url.searchParams.get("retailer")||"");setModal("person");setError("");return}if(url.pathname==="/admin/partners/nuevo"){event.preventDefault();setModal("partner");setError("");return}}
+    const rucCell=target.closest("td.rumbo-ruc-link") as HTMLTableCellElement|null;if(rucCell){event.preventDefault();event.stopPropagation();const taxId=rucCell.textContent?.trim()||"";fetch("/api/admin/overview",{cache:"no-store"}).then(r=>r.json()).then(p=>{const agency=(p.retailers||[]).find((a:Agency)=>a.tax_id===taxId);if(agency){setDetail(agency);setModal("agencyDetail")}}).catch(()=>{})}
+  };document.addEventListener("click",click,true);return()=>document.removeEventListener("click",click,true)},[]);
+
+  useEffect(()=>{if(!modal)return;const esc=(e:KeyboardEvent)=>{if(e.key==="Escape")closeModal()};document.addEventListener("keydown",esc);return()=>document.removeEventListener("keydown",esc)},[modal]);
+
+  function closeModal(){setModal(null);setError("");setCredentials(null);setDetail(null)}
+  function refreshBackoffice(){window.location.href=modal==="partner"?"/admin?tab=partners":"/admin?tab=retailers"}
+  async function submitAgency(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/user-management",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"agency",...Object.fromEntries(f.entries())})}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear la agencia.");refreshBackoffice()}catch(e){setError(e instanceof Error?e.message:"No pudimos crear la agencia.")}finally{setBusy(false)}}
+  async function submitPerson(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/user-management",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"agency_person",retailer_id:retailerId,...Object.fromEntries(f.entries())})}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear la persona.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear la persona.")}finally{setBusy(false)}}
+  async function submitPartner(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/partners",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f.entries()))}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear el Partner.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear el Partner.")}finally{setBusy(false)}}
 
   return <div className={collapsed&&isMain?"rumbo-admin-collapsed":""}>
-    <div style={{display:"flex",gap:8,padding:"8px 22px",background:"#fff",borderBottom:"1px solid #e4e7ec",fontSize:12,flexWrap:"wrap"}}>
-      <Link href="/admin" style={navItem}>Backoffice</Link>
-      <Link href="/admin?tab=partners" style={navItem}>Partners</Link>
-      <Link href="/admin?tab=retailers" style={navItem}>Agencias</Link>
-      <Link href="/admin/usuarios" style={navItem}>Usuarios</Link>
-      <Link href="/admin/pricing" style={navItem}>Pricing</Link>
-    </div>
+    <div style={{display:"flex",gap:8,padding:"8px 22px",background:"#fff",borderBottom:"1px solid #e4e7ec",fontSize:12,flexWrap:"wrap"}}><Link href="/admin" style={navItem}>Backoffice</Link><Link href="/admin?tab=partners" style={navItem}>Partners</Link><Link href="/admin?tab=retailers" style={navItem}>Agencias</Link><Link href="/admin/usuarios" style={navItem}>Usuarios</Link><Link href="/admin/pricing" style={navItem}>Pricing</Link></div>
     {isMain?<button aria-label={collapsed?"Expandir menú":"Contraer menú"} title={collapsed?"Expandir menú":"Contraer menú"} onClick={()=>setCollapsed(v=>!v)} style={{position:"fixed",zIndex:40,top:72,left:collapsed?38:226,width:38,height:34,borderRadius:8,border:"1px solid #d0d5dd",background:"white",color:"#344054",fontSize:20,lineHeight:1,fontWeight:900,cursor:"pointer",boxShadow:"0 2px 8px rgba(16,34,63,.08)",transition:"left .2s ease"}}>☰</button>:null}
     {children}
-    <style jsx global>{`
-      .rumbo-admin-collapsed main[class] { grid-template-columns:72px minmax(0,1fr) !important; }
-      .rumbo-admin-collapsed main[class] > aside:first-child { padding-left:10px !important; padding-right:10px !important; }
-      .rumbo-admin-collapsed main[class] > aside:first-child > a:first-child,
-      .rumbo-admin-collapsed main[class] > aside:first-child > p,
-      .rumbo-admin-collapsed main[class] > aside:first-child > a:last-child { display:none !important; }
-      .rumbo-admin-collapsed main[class] > aside:first-child nav button { justify-content:center !important; gap:0 !important; padding-left:8px !important; padding-right:8px !important; font-size:0 !important; }
-      .rumbo-admin-collapsed main[class] > aside:first-child nav button svg { width:20px !important; height:20px !important; margin:0 !important; }
-      .rumbo-admin-collapsed main[class] > section { max-width:none !important; }
-      @media(max-width:980px){
-        .rumbo-admin-collapsed main[class] { grid-template-columns:1fr !important; }
-      }
-    `}</style>
-  </div>;
+    {modal?<div style={overlay} onMouseDown={e=>{if(e.target===e.currentTarget)closeModal()}}><div style={modalBox}>
+      <button onClick={closeModal} style={closeButton} aria-label="Cerrar">×</button>
+      {modal==="agency"?<><p style={eyebrow}>Agencias</p><h2 style={title}>Nueva agencia</h2><p style={muted}>Completa los datos legales, operativos y bancarios.</p><form onSubmit={submitAgency} style={grid}><Field name="trade_name" label="Nombre comercial" required/><Field name="legal_name" label="Razón social" required/><Field name="tax_id" label="RUC" required/><Field name="contact_name" label="Contacto principal"/><Field name="contact_email" label="Correo" type="email"/><Field name="contact_phone" label="Teléfono"/><Field name="address" label="Dirección"/><Field name="city" label="Ciudad" defaultValue="Lima"/><Field name="country" label="País" defaultValue="Perú"/><Field name="user_limit" label="Límite de usuarios" type="number" defaultValue="10"/><Field name="inactivity_days" label="Días de inactividad" type="number" defaultValue="30"/><Field name="bank_name" label="Banco principal"/><Field name="bank_account_holder" label="Titular de cuenta"/><Field name="bank_account_number" label="Número de cuenta"/><Field name="bank_cci" label="CCI"/><label style={fieldLabel}>Moneda<select name="bank_account_currency" defaultValue="PEN" style={input}><option>PEN</option><option>USD</option><option>EUR</option></select></label><label style={{...fieldLabel,gridColumn:"1/-1"}}>Observaciones<textarea name="notes" style={{...input,minHeight:65}}/></label>{error?<p style={errorStyle}>{error}</p>:null}<button disabled={busy} style={primary}>{busy?"Creando…":"Crear agencia"}</button></form></>:null}
+      {modal==="person"?<><p style={eyebrow}>Personas de agencia</p><h2 style={title}>Nueva persona</h2><p style={muted}>El usuario quedará asociado únicamente a la agencia seleccionada.</p>{credentials?<CredentialsPanel credentials={credentials} onDone={refreshBackoffice}/>:<form onSubmit={submitPerson} style={grid}><label style={fieldLabel}>Rol<select name="role" defaultValue="counter" style={input}><option value="counter">Counter</option><option value="admin">Administrador</option></select></label><Field name="first_name" label="Nombres" required/><Field name="last_name" label="Apellidos" required/><Field name="email" label="Correo de acceso" type="email" required wide/>{error?<p style={errorStyle}>{error}</p>:null}<button disabled={busy} style={primary}>{busy?"Creando…":"Crear persona"}</button></form>}</>:null}
+      {modal==="partner"?<><p style={eyebrow}>Partners</p><h2 style={title}>Nuevo partner</h2><p style={muted}>Crea su acceso y código de referido.</p>{credentials?<CredentialsPanel credentials={credentials} onDone={refreshBackoffice}/>:<form onSubmit={submitPartner} style={grid}><Field name="first_name" label="Nombres" required/><Field name="last_name" label="Apellidos" required/><Field name="email" label="Correo" type="email" required/><label style={fieldLabel}>Tipo documento<select name="document_type" defaultValue="DNI" style={input}><option>DNI</option><option>CE</option><option>PASSPORT</option><option>RUC</option></select></label><Field name="document_number" label="Nro. documento" required/><Field name="phone" label="Teléfono"/>{error?<p style={errorStyle}>{error}</p>:null}<button disabled={busy} style={primary}>{busy?"Creando…":"Crear partner"}</button></form>}</>:null}
+      {modal==="agencyDetail"&&detail?<><p style={eyebrow}>Detalle de empresa</p><h2 style={title}>{detail.trade_name}</h2><p style={muted}>{detail.legal_name}</p><div style={detailGrid}><Detail label="RUC" value={detail.tax_id}/><Detail label="Estado" value={String(detail.status||"—")}/><Detail label="Contacto" value={String(detail.contact_email||"—")}/><Detail label="Teléfono" value={String(detail.phone||"—")}/><Detail label="Usuarios" value={String(detail.member_count??"—")}/><Detail label="Creada" value={detail.created_at?new Date(String(detail.created_at)).toLocaleDateString("es-PE"):"—"}/></div><p style={{...muted,marginTop:14}}>Los datos bancarios y operativos adicionales se conservarán en la ficha de la agencia cuando estén disponibles en el resumen administrativo.</p></>:null}
+    </div></div>:null}
+    <style jsx global>{`.rumbo-ruc-link{color:#175cd3!important;text-decoration:underline!important;text-underline-offset:2px;cursor:pointer!important;font-weight:700}.rumbo-admin-collapsed main[class]{grid-template-columns:72px minmax(0,1fr)!important}.rumbo-admin-collapsed main[class]>aside:first-child{padding-left:10px!important;padding-right:10px!important}.rumbo-admin-collapsed main[class]>aside:first-child>a:first-child,.rumbo-admin-collapsed main[class]>aside:first-child>p,.rumbo-admin-collapsed main[class]>aside:first-child>a:last-child{display:none!important}.rumbo-admin-collapsed main[class]>aside:first-child nav button{justify-content:center!important;gap:0!important;padding-left:8px!important;padding-right:8px!important;font-size:0!important}.rumbo-admin-collapsed main[class]>aside:first-child nav button svg{width:20px!important;height:20px!important;margin:0!important}.rumbo-admin-collapsed main[class]>section{max-width:none!important}@media(max-width:980px){.rumbo-admin-collapsed main[class]{grid-template-columns:1fr!important}}`}</style>
+  </div>
 }
 
+function Field({name,label,type="text",required=false,defaultValue,wide=false}:{name:string;label:string;type?:string;required?:boolean;defaultValue?:string;wide?:boolean}){return <label style={{...fieldLabel,gridColumn:wide?"1/-1":undefined}}>{label}<input name={name} type={type} required={required} defaultValue={defaultValue} style={input}/></label>}
+function Detail({label,value}:{label:string;value:string}){return <div style={{padding:"10px 12px",border:"1px solid #e4e7ec",borderRadius:9,background:"#f8fafc"}}><small style={{display:"block",color:"#667085"}}>{label}</small><strong>{value}</strong></div>}
+function CredentialsPanel({credentials,onDone}:{credentials:Credentials;onDone:()=>void}){return <div><p style={{...muted,marginTop:12}}>Guarda estas credenciales. La contraseña es temporal.</p><div style={{background:"#f8fafc",border:"1px solid #e4e7ec",borderRadius:10,padding:14,marginTop:12}}><small>Usuario</small><strong style={{display:"block",fontSize:17}}>{credentials.username}</strong><small style={{display:"block",marginTop:10}}>Contraseña temporal</small><strong style={{display:"block",fontSize:20}}>{credentials.temporary_password}</strong></div><button onClick={onDone} style={primary}>Entendido</button></div>}
+
 const navItem:CSSProperties={padding:"6px 10px",borderRadius:7,color:"#475467",textDecoration:"none",fontWeight:700,background:"#f7f8fa"};
+const overlay:CSSProperties={position:"fixed",inset:0,zIndex:2000,background:"rgba(15,23,42,.62)",display:"grid",placeItems:"center",padding:20,overflowY:"auto"};
+const modalBox:CSSProperties={position:"relative",width:"min(820px,100%)",maxHeight:"calc(100vh - 40px)",overflowY:"auto",background:"white",borderRadius:16,padding:22,boxShadow:"0 28px 80px rgba(0,0,0,.3)"};
+const closeButton:CSSProperties={position:"absolute",right:14,top:10,border:0,background:"transparent",fontSize:28,cursor:"pointer",color:"#667085"};
+const grid:CSSProperties={display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10,marginTop:16};
+const fieldLabel:CSSProperties={display:"grid",gap:5,fontSize:12,color:"#475467",fontWeight:700};
+const input:CSSProperties={padding:"9px 10px",border:"1px solid #cfd5df",borderRadius:7,width:"100%",background:"white",fontSize:13};
+const primary:CSSProperties={marginTop:10,border:0,borderRadius:8,padding:"10px 14px",background:"#10223f",color:"white",fontWeight:800,cursor:"pointer",gridColumn:"1/-1",justifySelf:"start"};
+const eyebrow:CSSProperties={margin:0,color:"#e9573b",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".12em"};
+const title:CSSProperties={margin:"5px 0",fontSize:26};const muted:CSSProperties={margin:0,color:"#667085",fontSize:13};const errorStyle:CSSProperties={gridColumn:"1/-1",margin:0,padding:9,borderRadius:7,background:"#fff5f5",color:"#991b1b"};const detailGrid:CSSProperties={display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10,marginTop:16};
