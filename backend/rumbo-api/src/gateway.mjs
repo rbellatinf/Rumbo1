@@ -57,7 +57,231 @@ app.get("/health", async (_req, res) => {
 app.use(requireApiKey);
 installUserManagementRoutes(app,{pool,requireAdmin,audit});
 
-// Existing API is served by the core while management endpoints above remain in the gateway.
+app.get("/api/referrals/:code", async (req, res) => {
+  const code = clean(req.params.code).toUpperCase();
+  if (!/^RUMBO-[A-Z0-9-]{3,34}$/.test(code)) return res.status(404).json({ valid: false });
+  const { rows } = await pool.query(`SELECT p.referral_code,p.first_name,p.last_name FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.referral_code=$1 AND a.status='active' LIMIT 1`, [code]);
+  if (!rows[0]) return res.status(404).json({ valid: false });
+  res.json({ valid: true, code: rows[0].referral_code, partner_name: `${rows[0].first_name} ${rows[0].last_name}`.trim() });
+});
+
+const departurePublicJson = `jsonb_build_object(
+  'id',x.id,'origin_iata',x.origin_iata,'departure_date',x.departure_date,'return_date',x.return_date,
+  'currency',x.currency,'price_amount',x.price_amount::float8,'capacity',x.capacity,'available_capacity',x.available_capacity,
+  'low_stock_threshold',x.low_stock_threshold,'status',x.status,'sale_deadline',x.sale_deadline,
+  'min_passengers_per_booking',x.min_passengers_per_booking,'max_passengers_per_booking',x.max_passengers_per_booking,
+  'confirmation_mode',x.confirmation_mode,'minimum_group_size',x.minimum_group_size,
+  'confirmation_label',CASE WHEN x.confirmation_mode='confirmed' THEN 'Salida confirmada' ELSE 'Sujeta a mínimo de pasajeros' END,
+  'sale_open',CASE WHEN x.sale_deadline IS NULL OR x.sale_deadline>=now() THEN true ELSE false END
+)`;
+
+const catalogSelect = `
+SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.destination_iata,
+       p.product_type,p.provider,p.provider_reference,p.duration_label,p.tag,p.included,p.status,p.featured,p.sort_order,
+       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.capacity,d.available_capacity,d.low_stock_threshold,
+       d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,d.confirmation_mode,d.minimum_group_size,
+       stats.from_price_amount,stats.active_departure_count,stats.departures,
+       i.url AS image_url,i.alt_text
+FROM rumbo_catalog_products p
+LEFT JOIN LATERAL (
+  SELECT * FROM rumbo_catalog_departures d
+   WHERE d.product_id=p.id AND d.status='active' AND (d.departure_date IS NULL OR d.departure_date>=current_date)
+     AND (d.sale_deadline IS NULL OR d.sale_deadline>=now())
+   ORDER BY d.departure_date NULLS LAST,d.price_amount LIMIT 1
+) d ON true
+LEFT JOIN LATERAL (
+  SELECT MIN(x.price_amount)::float8 AS from_price_amount,
+         COUNT(*)::int AS active_departure_count,
+         COALESCE(jsonb_agg(${departurePublicJson} ORDER BY x.departure_date NULLS LAST,x.price_amount),'[]'::jsonb) AS departures
+    FROM rumbo_catalog_departures x
+   WHERE x.product_id=p.id AND x.status='active' AND (x.departure_date IS NULL OR x.departure_date>=current_date)
+     AND (x.sale_deadline IS NULL OR x.sale_deadline>=now())
+) stats ON true
+LEFT JOIN LATERAL (
+  SELECT * FROM rumbo_catalog_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.created_at LIMIT 1
+) i ON true`;
+
+app.get("/api/catalog", async (req, res) => {
+  const destination = clean(req.query.destination).toUpperCase();
+  const values = [];
+  let where = ` WHERE p.status='published'`;
+  if (destination && /^[A-Z]{3}$/.test(destination)) { values.push(destination); where += ` AND p.destination_iata=$${values.length}`; }
+  const { rows } = await pool.query(`${catalogSelect}${where} ORDER BY p.featured DESC,p.sort_order,p.created_at DESC LIMIT 100`, values);
+  res.json({ mode: "live", source: "rumbo", products: rows });
+});
+
+function bookingResponse(row, departure) {
+  const unit = Number(departure?.price_amount ?? 0);
+  const travellers = Number(row.adults || 0) + Number(row.children || 0);
+  return { id: row.id, reference: row.reference, status: row.status, product_name: row.product_name, country: row.country, departure_date: row.departure_date, return_date: row.return_date, adults: row.adults, children: row.children, contact_channel: row.contact_channel, unit_price_amount: unit || null, total_amount: unit ? unit * travellers : null, price_display: row.price_display, currency: row.currency, remaining_capacity: departure?.available_capacity ?? null, confirmation_mode: departure?.confirmation_mode ?? null, confirmation_label: departure?.confirmation_mode === "minimum_required" ? "Sujeta a mínimo de pasajeros" : "Salida confirmada", payment_status: "pending", payment_url: null, hold_expires_at: null, created_at: row.created_at, updated_at: row.updated_at };
+}
+
+app.post("/api/bookings", async (req, res) => {
+  const body = req.body || {};
+  const idempotency = clean(body.idempotency_key);
+  const productId = clean(body.catalog_product_id || body.rumbo_product_id || body.spree_product_id);
+  const departureId = clean(body.catalog_departure_id || body.variant_id || body.spree_variant_id);
+  const email = clean(body.contact_email).toLowerCase(), name = clean(body.contact_name), phone = clean(body.contact_phone);
+  const adults = Number(body.adults || 1), children = Number(body.children || 0), travellers = adults + children;
+  const referral = clean(body.referral_code).toUpperCase(), requestedOrigin = clean(body.origin_iata).toUpperCase();
+  if (!/^[0-9a-f-]{36}$/i.test(idempotency) || !productId || !email || !name || !phone || adults < 1 || adults > 18 || children < 0 || children > 18 || travellers > 18) return res.status(422).json({ error: { message: "La solicitud de reserva está incompleta." } });
+
+  const existing = await pool.query(`SELECT * FROM rumbo_booking_requests WHERE idempotency_key=$1::uuid LIMIT 1`, [idempotency]);
+  if (existing.rows[0]) {
+    const dep = existing.rows[0].catalog_departure_id ? await pool.query(`SELECT price_amount::float8,available_capacity,confirmation_mode FROM rumbo_catalog_departures WHERE id=$1`, [existing.rows[0].catalog_departure_id]) : { rows: [] };
+    return res.json(bookingResponse(existing.rows[0], dep.rows[0]));
+  }
+  if (referral) {
+    const valid = await pool.query(`SELECT 1 FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.referral_code=$1 AND a.status='active'`, [referral]);
+    if (!valid.rowCount) return res.status(422).json({ error: { message: "El enlace del Partner ya no es válido." } });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const product = (await client.query(`SELECT * FROM rumbo_catalog_products WHERE id=$1::uuid AND status='published' FOR SHARE`, [productId])).rows[0];
+    if (!product) { await client.query("ROLLBACK"); return res.status(404).json({ error: { message: "El producto ya no está disponible." } }); }
+
+    const values = [product.id];
+    let depQuery = `SELECT * FROM rumbo_catalog_departures WHERE product_id=$1 AND status='active' AND (sale_deadline IS NULL OR sale_deadline>=now())`;
+    if (departureId && /^[0-9a-f-]{36}$/i.test(departureId)) { values.push(departureId); depQuery += ` AND id=$${values.length}::uuid`; }
+    else if (clean(body.departure_date)) { values.push(clean(body.departure_date)); depQuery += ` AND departure_date=$${values.length}::date`; }
+    if (requestedOrigin && /^[A-Z]{3}$/.test(requestedOrigin)) { values.push(requestedOrigin); depQuery += ` AND (origin_iata IS NULL OR origin_iata=$${values.length})`; }
+    depQuery += ` ORDER BY departure_date NULLS LAST,price_amount LIMIT 1 FOR UPDATE`;
+    const departure = (await client.query(depQuery, values)).rows[0];
+    if (!departure) { await client.query("ROLLBACK"); return res.status(409).json({ error: { message: "La venta de esa salida ya cerró o no está disponible para el origen seleccionado." } }); }
+    if (travellers < Number(departure.min_passengers_per_booking || 1) || travellers > Number(departure.max_passengers_per_booking || 9)) {
+      await client.query("ROLLBACK");
+      return res.status(422).json({ error: { message: `Esta salida permite reservas de ${departure.min_passengers_per_booking} a ${departure.max_passengers_per_booking} pasajeros.` } });
+    }
+    if (departure.available_capacity != null && Number(departure.available_capacity) < travellers) { await client.query("ROLLBACK"); return res.status(409).json({ error: { message: "No quedan suficientes cupos para todos los viajeros." } }); }
+
+    if (departure.available_capacity != null) {
+      await client.query(`UPDATE rumbo_catalog_departures SET available_capacity=available_capacity-$2 WHERE id=$1`, [departure.id, travellers]);
+      departure.available_capacity = Number(departure.available_capacity) - travellers;
+    }
+    await client.query(`SELECT set_config('rumbo.actor',$1,true)`, [email]);
+    const priceDisplay = `${departure.currency} ${Number(departure.price_amount).toFixed(2)}`;
+    const snapshot = { image: body.product_snapshot?.image, duration: product.duration_label, tag: product.tag, included: product.included || [], origin_iata: departure.origin_iata, confirmation_mode: departure.confirmation_mode, minimum_group_size: departure.minimum_group_size, sale_deadline: departure.sale_deadline };
+    const inserted = await client.query(`INSERT INTO rumbo_booking_requests(idempotency_key,catalog_product_id,catalog_departure_id,spree_product_id,spree_variant_id,product_slug,product_name,provider,provider_reference,country,origin_iata,destination_iata,departure_date,return_date,adults,children,price_display,currency,contact_name,contact_email,contact_phone,contact_channel,referral_code,notes,product_snapshot,status,consent_accepted_at) VALUES($1::uuid,$2,$3,NULL,NULL,$4,$5,'Rumbo',$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,'new',now()) RETURNING *`, [idempotency,product.id,departure.id,product.slug,product.name,product.provider_reference,product.country,departure.origin_iata || requestedOrigin,product.destination_iata,departure.departure_date,departure.return_date,adults,children,priceDisplay,departure.currency,name,email,phone,clean(body.contact_channel)||"whatsapp",referral||null,clean(body.notes)||null,JSON.stringify(snapshot)]);
+    await client.query("COMMIT");
+    res.status(201).json(bookingResponse(inserted.rows[0], departure));
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {}); console.error(error); res.status(500).json({ error: { message: "No pudimos crear la reserva en Rumbo." } });
+  } finally { client.release(); }
+});
+
+app.get("/api/bookings/:reference", async (req, res) => {
+  const reference = clean(req.params.reference).toUpperCase(), email = clean(req.query.email).toLowerCase();
+  if (!reference || !email) return res.status(422).json({ error: { message: "Referencia y correo son obligatorios." } });
+  const row = (await pool.query(`SELECT * FROM rumbo_booking_requests WHERE reference=$1 AND lower(contact_email)=$2 LIMIT 1`, [reference,email])).rows[0];
+  if (!row) return res.status(404).json({ error: { message: "No encontramos una reserva con esos datos." } });
+  const dep = row.catalog_departure_id ? await pool.query(`SELECT price_amount::float8,available_capacity,confirmation_mode FROM rumbo_catalog_departures WHERE id=$1`, [row.catalog_departure_id]) : { rows: [] };
+  res.json(bookingResponse(row, dep.rows[0]));
+});
+
+const adminCatalogSelect = `
+SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.destination_iata,
+       p.product_type,p.provider,p.provider_reference,p.duration_label,p.tag,p.included,p.status,p.featured,p.sort_order,
+       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.cost_amount::float8,
+       (d.price_amount-COALESCE(d.cost_amount,d.price_amount))::float8 AS margin_amount,
+       CASE WHEN d.price_amount>0 AND d.cost_amount IS NOT NULL THEN ROUND(((d.price_amount-d.cost_amount)/d.price_amount)*100,2)::float8 ELSE NULL END AS margin_pct,
+       d.capacity,d.available_capacity,d.low_stock_threshold,d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,
+       d.confirmation_mode,d.minimum_group_size,
+       stats.from_price_amount,stats.active_departure_count,stats.departures,
+       i.url AS image_url,i.alt_text
+FROM rumbo_catalog_products p
+LEFT JOIN LATERAL (
+  SELECT * FROM rumbo_catalog_departures d WHERE d.product_id=p.id AND d.status='active' ORDER BY d.departure_date NULLS LAST,d.price_amount LIMIT 1
+) d ON true
+LEFT JOIN LATERAL (
+  SELECT MIN(x.price_amount)::float8 AS from_price_amount,COUNT(*)::int AS active_departure_count,
+         COALESCE(jsonb_agg(jsonb_build_object(
+           'id',x.id,'origin_iata',x.origin_iata,'departure_date',x.departure_date,'return_date',x.return_date,
+           'currency',x.currency,'price_amount',x.price_amount::float8,'cost_amount',x.cost_amount::float8,
+           'margin_amount',(x.price_amount-COALESCE(x.cost_amount,x.price_amount))::float8,
+           'margin_pct',CASE WHEN x.price_amount>0 AND x.cost_amount IS NOT NULL THEN ROUND(((x.price_amount-x.cost_amount)/x.price_amount)*100,2)::float8 ELSE NULL END,
+           'capacity',x.capacity,'available_capacity',x.available_capacity,'low_stock_threshold',x.low_stock_threshold,'status',x.status,
+           'sale_deadline',x.sale_deadline,'min_passengers_per_booking',x.min_passengers_per_booking,'max_passengers_per_booking',x.max_passengers_per_booking,
+           'confirmation_mode',x.confirmation_mode,'minimum_group_size',x.minimum_group_size
+         ) ORDER BY (x.price_amount-COALESCE(x.cost_amount,x.price_amount)) DESC,x.departure_date NULLS LAST),'[]'::jsonb) AS departures
+    FROM rumbo_catalog_departures x WHERE x.product_id=p.id AND x.status='active'
+) stats ON true
+LEFT JOIN LATERAL (SELECT * FROM rumbo_catalog_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.created_at LIMIT 1) i ON true`;
+
+app.get("/api/admin/catalog", requireAdmin, async (req, res) => {
+  const sort = clean(req.query.sort);
+  const order = sort === "margin" ? `COALESCE(margin_amount,0) DESC,p.created_at DESC` : `p.created_at DESC`;
+  const { rows } = await pool.query(`${adminCatalogSelect} ORDER BY ${order} LIMIT 250`);
+  res.json({ products: rows, sort });
+});
+
+function departureFields(body) {
+  const price = Number(body.price_amount), capacity = body.capacity === "" || body.capacity == null ? null : Number(body.capacity);
+  const minPassengers = Math.max(1, Number(body.min_passengers_per_booking ?? 1));
+  const maxPassengers = Math.min(18, Math.max(minPassengers, Number(body.max_passengers_per_booking ?? 9)));
+  const cost = body.cost_amount === "" || body.cost_amount == null ? null : Number(body.cost_amount);
+  const confirmationMode = clean(body.confirmation_mode) === "minimum_required" ? "minimum_required" : "confirmed";
+  const minimumGroupSize = confirmationMode === "minimum_required" ? Math.max(1, Number(body.minimum_group_size ?? minPassengers)) : null;
+  return { price, capacity, minPassengers, maxPassengers, cost, confirmationMode, minimumGroupSize };
+}
+
+app.post("/api/admin/catalog", requireAdmin, async (req, res) => {
+  const name = clean(req.body.name), slug = clean(req.body.slug).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const status = clean(req.body.status) || "draft";
+  if (!name || !slug || !["draft","published","archived"].includes(status)) return res.status(422).json({ error: { message: "Nombre, slug y estado son obligatorios." } });
+  const included = Array.isArray(req.body.included) ? req.body.included.map((x) => clean(x)).filter(Boolean).slice(0,30) : [];
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const product = (await client.query(`INSERT INTO rumbo_catalog_products(slug,name,short_description,description,country,city,destination_iata,product_type,provider,provider_reference,duration_label,tag,included,status,featured,sort_order) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16) RETURNING *`, [slug,name,clean(req.body.short_description)||null,clean(req.body.description)||null,clean(req.body.country)||null,clean(req.body.city)||null,clean(req.body.destination_iata).toUpperCase(),clean(req.body.product_type)||"package",clean(req.body.provider)||"Rumbo",clean(req.body.provider_reference)||null,clean(req.body.duration_label)||null,clean(req.body.tag)||null,JSON.stringify(included),status,Boolean(req.body.featured),Number(req.body.sort_order)||0])).rows[0];
+    const d = departureFields(req.body);
+    if (Number.isFinite(d.price) && d.price >= 0) {
+      await client.query(`INSERT INTO rumbo_catalog_departures(product_id,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,low_stock_threshold,sale_deadline,min_passengers_per_booking,max_passengers_per_booking,confirmation_mode,minimum_group_size,status) VALUES($1,NULLIF($2,''),NULLIF($3,'')::date,NULLIF($4,'')::date,$5,$6,$7,$8,$8,$9,NULLIF($10,'')::timestamptz,$11,$12,$13,$14,'active')`, [product.id,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.capacity,Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.minPassengers,d.maxPassengers,d.confirmationMode,d.minimumGroupSize]);
+    }
+    const imageUrl = clean(req.body.image_url);
+    if (imageUrl) await client.query(`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,is_primary) VALUES($1,$2,$3,true)`,[product.id,imageUrl,clean(req.body.image_alt)||name]);
+    await client.query("COMMIT");
+    await audit(req.adminSession.email,"catalog.product_created","catalog_product",product.id,{name,status});
+    res.status(201).json({ product });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    if (error.code === "23505") return res.status(409).json({ error: { message: "Ya existe un producto con ese slug." } });
+    console.error(error); res.status(500).json({ error: { message: "No pudimos crear el producto." } });
+  } finally { client.release(); }
+});
+
+app.patch("/api/admin/catalog/:id", requireAdmin, async (req, res) => {
+  const status = clean(req.body.status);
+  if (status && !["draft","published","archived"].includes(status)) return res.status(422).json({ error: { message: "Estado inválido." } });
+  const { rows } = await pool.query(`UPDATE rumbo_catalog_products SET name=COALESCE(NULLIF($2,''),name),short_description=COALESCE($3,short_description),description=COALESCE($4,description),country=COALESCE($5,country),city=COALESCE($6,city),destination_iata=COALESCE(NULLIF($7,''),destination_iata),duration_label=COALESCE($8,duration_label),tag=COALESCE($9,tag),status=COALESCE(NULLIF($10,''),status),featured=COALESCE($11,featured),sort_order=COALESCE($12,sort_order) WHERE id=$1 RETURNING *`, [req.params.id,clean(req.body.name),req.body.short_description ?? null,req.body.description ?? null,req.body.country ?? null,req.body.city ?? null,clean(req.body.destination_iata).toUpperCase(),req.body.duration_label ?? null,req.body.tag ?? null,status,typeof req.body.featured === "boolean" ? req.body.featured : null,Number.isFinite(Number(req.body.sort_order)) ? Number(req.body.sort_order) : null]);
+  if (!rows[0]) return res.status(404).json({ error: { message: "Producto no encontrado." } });
+  await audit(req.adminSession.email,"catalog.product_updated","catalog_product",req.params.id,req.body);
+  res.json({ product: rows[0] });
+});
+
+app.post("/api/admin/catalog/:id/departures", requireAdmin, async (req, res) => {
+  const d = departureFields(req.body);
+  if (!Number.isFinite(d.price) || d.price < 0) return res.status(422).json({ error: { message: "Precio inválido." } });
+  const { rows } = await pool.query(`INSERT INTO rumbo_catalog_departures(product_id,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,low_stock_threshold,sale_deadline,min_passengers_per_booking,max_passengers_per_booking,confirmation_mode,minimum_group_size,status) VALUES($1,NULLIF($2,''),NULLIF($3,'')::date,NULLIF($4,'')::date,$5,$6,$7,$8,$8,$9,NULLIF($10,'')::timestamptz,$11,$12,$13,$14,'active') RETURNING *, (price_amount-COALESCE(cost_amount,price_amount))::float8 AS margin_amount`, [req.params.id,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.capacity,Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.minPassengers,d.maxPassengers,d.confirmationMode,d.minimumGroupSize]);
+  await audit(req.adminSession.email,"catalog.departure_created","catalog_product",req.params.id,{departure_id:rows[0].id});
+  res.status(201).json({ departure: rows[0] });
+});
+
+app.post("/api/admin/catalog/:id/images", requireAdmin, async (req, res) => {
+  const url = clean(req.body.url); if (!url) return res.status(422).json({ error: { message: "URL de imagen obligatoria." } });
+  const primary = Boolean(req.body.is_primary), client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (primary) await client.query(`UPDATE rumbo_catalog_images SET is_primary=false WHERE product_id=$1`,[req.params.id]);
+    const { rows } = await client.query(`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,sort_order,is_primary) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.id,url,clean(req.body.alt_text)||null,Number(req.body.sort_order)||0,primary]);
+    await client.query("COMMIT");
+    await audit(req.adminSession.email,"catalog.image_created","catalog_product",req.params.id,{image_id:rows[0].id});
+    res.status(201).json({ image: rows[0] });
+  } catch(error) { await client.query("ROLLBACK").catch(()=>{}); console.error(error); res.status(500).json({error:{message:"No pudimos agregar la imagen."}}); }
+  finally { client.release(); }
+});
+
 app.use(async (req, res) => {
   try {
     const headers = new Headers();
