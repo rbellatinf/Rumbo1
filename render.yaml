@@ -26,7 +26,7 @@ services:
           type: web
           envVarKey: RUMBO_API_KEY
       - key: RUMBO_DEMO_MODE
-        value: "false"
+        value: "true"
       - key: SPREE_API_URL
         fromService:
           name: rumbo1-spree
@@ -50,7 +50,7 @@ services:
       - key: RUMBO_API_KEY
         generateValue: true
       - key: RUMBO_DEMO_MODE
-        value: "false"
+        value: "true"
       - key: RUMBO_ADMIN_EMAIL
         sync: false
       - key: RUMBO_ADMIN_PASSWORD
