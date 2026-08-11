@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import AdminLayoutClient from "./AdminLayoutClient";
+import AdminNavGuard from "./AdminNavGuard";
 
 export default function AdminLayout({children}:{children:ReactNode}){
-  return <AdminLayoutClient>{children}</AdminLayoutClient>;
+  return <AdminLayoutClient><AdminNavGuard/>{children}</AdminLayoutClient>;
 }
