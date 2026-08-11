@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 
 const clean=(v)=>String(v||"").trim();
+const sha256=(v)=>crypto.createHash("sha256").update(v).digest("hex");
 function tempPassword(){return `Rumbo#${crypto.randomBytes(5).toString("base64url")}9a`}
 
 export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
@@ -10,6 +11,21 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     const {rows}=await pool.query(`SELECT internal_role FROM rumbo_internal_members WHERE account_id=$1 LIMIT 1`,[req.adminSession.account_id]);
     if(rows[0]?.internal_role!=="admin") return res.status(403).json({error:{message:"Solo un Administrador Rumbo puede realizar esta acción."}});
     next();
+  }
+
+  async function retailerAdminFromRequest(req){
+    const header=req.get("Authorization")||"";
+    if(!header.startsWith("Bearer ")) return null;
+    const token=header.slice(7).trim(); if(!token) return null;
+    const {rows}=await pool.query(`SELECT s.account_id,a.email,m.retailer_id,m.member_role FROM rumbo_auth_sessions s JOIN rumbo_accounts a ON a.id=s.account_id JOIN rumbo_retailer_members m ON m.account_id=a.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND a.status='active' LIMIT 1`,[sha256(token)]);
+    return rows[0]?.member_role==='admin'?rows[0]:null;
+  }
+
+  async function createAgencyPerson({retailerId,email,first,last,role,createdBy,actor,res}){
+    const agency=(await pool.query(`SELECT id,user_limit FROM rumbo_retailers WHERE id=$1`,[retailerId])).rows[0];if(!agency)return res.status(404).json({error:{message:'Agencia no encontrada.'}});
+    const count=Number((await pool.query(`SELECT count(*)::int n FROM rumbo_retailer_members WHERE retailer_id=$1`,[retailerId])).rows[0]?.n||0);if(count>=agency.user_limit)return res.status(409).json({error:{message:'La agencia alcanzó su límite de usuarios.'}});
+    const password=tempPassword(),hash=await bcrypt.hash(password,12),accountRole=role==='admin'?'retailer_owner':'retailer_agent',client=await pool.connect();
+    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,$3,'active',true) RETURNING id,email,status`,[email,hash,accountRole]);await client.query(`INSERT INTO rumbo_retailer_members(retailer_id,account_id,member_role,first_name,last_name,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6)`,[retailerId,rows[0].id,role,first,last,createdBy]);await client.query('COMMIT');await audit(actor,'retailer.person_created','retailer_user',rows[0].id,{retailer_id:retailerId,email,role});return res.status(201).json({person:{...rows[0],first_name:first,last_name:last,member_role:role},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe una persona con ese correo.'}});console.error(e);return res.status(500).json({error:{message:'No pudimos crear la persona.'}})}finally{client.release()}
   }
 
   app.get('/api/admin/internal-users',requireAdmin,async(_req,res)=>{
@@ -38,9 +54,13 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
   app.post('/api/admin/agency-people',requireAdmin,requireInternalAdmin,async(req,res)=>{
     const retailerId=clean(req.body.retailer_id),email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter';
     if(!retailerId||!email||!first||!last||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Agencia, correo, nombres, apellidos y rol son obligatorios.'}});
-    const agency=(await pool.query(`SELECT id,user_limit FROM rumbo_retailers WHERE id=$1`,[retailerId])).rows[0];if(!agency)return res.status(404).json({error:{message:'Agencia no encontrada.'}});
-    const count=Number((await pool.query(`SELECT count(*)::int n FROM rumbo_retailer_members WHERE retailer_id=$1`,[retailerId])).rows[0]?.n||0);if(count>=agency.user_limit)return res.status(409).json({error:{message:'La agencia alcanzó su límite de usuarios.'}});
-    const password=tempPassword(),hash=await bcrypt.hash(password,12),accountRole=role==='admin'?'retailer_owner':'retailer_agent',client=await pool.connect();
-    try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,$3,'active',true) RETURNING id,email,status`,[email,hash,accountRole]);await client.query(`INSERT INTO rumbo_retailer_members(retailer_id,account_id,member_role,first_name,last_name,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6)`,[retailerId,rows[0].id,role,first,last,req.adminSession.account_id]);await client.query('COMMIT');await audit(req.adminSession.email,'retailer.person_created','retailer_user',rows[0].id,{retailer_id:retailerId,email,role});res.status(201).json({person:{...rows[0],first_name:first,last_name:last,member_role:role},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe una persona con ese correo.'}});console.error(e);res.status(500).json({error:{message:'No pudimos crear la persona.'}})}finally{client.release()}
+    return createAgencyPerson({retailerId,email,first,last,role,createdBy:req.adminSession.account_id,actor:req.adminSession.email,res});
+  });
+
+  app.post('/api/retailer-admin/people',async(req,res)=>{
+    const session=await retailerAdminFromRequest(req);if(!session)return res.status(403).json({error:{message:'Solo un Administrador de la agencia puede crear personas.'}});
+    const email=clean(req.body.email).toLowerCase(),first=clean(req.body.first_name),last=clean(req.body.last_name),role=clean(req.body.role)||'counter';
+    if(!email||!first||!last||!['admin','counter'].includes(role))return res.status(422).json({error:{message:'Correo, nombres, apellidos y rol son obligatorios.'}});
+    return createAgencyPerson({retailerId:session.retailer_id,email,first,last,role,createdBy:session.account_id,actor:session.email,res});
   });
 }
