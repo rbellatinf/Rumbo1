@@ -5,7 +5,7 @@ import {
   parseBookingRecord,
   toBookingApiPayload,
 } from "../../../lib/booking-requests";
-import { accessConfiguration, providerHeaders } from "../../../lib/rumbo-access";
+import { accessConfiguration, providerHeaders, RUMBO_SESSION_COOKIE } from "../../../lib/rumbo-access";
 
 export const dynamic = "force-dynamic";
 const REFERRAL_COOKIE = "rumbo_referral";
@@ -64,12 +64,13 @@ export async function POST(request: NextRequest) {
     const apiPayload = toBookingApiPayload(booking);
     const rumbo = accessConfiguration();
     const nativeReference = booking.product.id.startsWith("rumbo:") ? booking.product.id.slice(6) : null;
+    const sessionToken = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
 
     if (rumbo?.kind === "rumbo" && nativeReference) {
       apiPayload.spree_product_id = nativeReference;
       const upstream = await fetch(`${rumbo.apiUrl}/api/bookings`, {
         method: "POST",
-        headers: providerHeaders(rumbo, { json: true }),
+        headers: providerHeaders(rumbo, { json: true, token: sessionToken }),
         body: JSON.stringify(apiPayload),
         cache: "no-store",
       });
