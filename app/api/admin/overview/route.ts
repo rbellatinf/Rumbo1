@@ -19,15 +19,20 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token && !demoMode()) return noStoreJson({ message: "No hay una sesión administrativa activa." }, 401);
 
-  const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
-    headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
-    cache: "no-store",
-  });
-  const payload = await parseJson(upstream);
-  if (!upstream.ok) {
-    const response = noStoreJson({ message: backendMessage(payload, "No pudimos cargar el backoffice.") }, upstream.status || 502);
-    if (upstream.status === 401) response.cookies.delete(RUMBO_SESSION_COOKIE);
-    return response;
+  try {
+    const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
+      headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
+      cache: "no-store",
+    });
+    const payload = await parseJson(upstream);
+    if (!upstream.ok) {
+      const response = noStoreJson({ message: backendMessage(payload, "No pudimos cargar el backoffice.") }, upstream.status || 502);
+      if (upstream.status === 401) response.cookies.delete(RUMBO_SESSION_COOKIE);
+      return response;
+    }
+    return noStoreJson(payload);
+  } catch (error) {
+    console.error("admin overview upstream failed", error);
+    return noStoreJson({ message: "Rumbo API no respondió al cargar el backoffice." }, 502);
   }
-  return noStoreJson(payload);
 }
