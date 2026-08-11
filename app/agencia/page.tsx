@@ -8,113 +8,33 @@ import styles from "./agencia.module.css";
 type Member = { account_id:string; first_name:string; last_name:string; member_role:"admin"|"counter"; email:string; status:string; display_status:string; last_login_at?:string|null; disabled_reason?:string|null };
 type Performance = { account_id:string; first_name:string; last_name:string; member_role:string; status:string; last_login_at?:string|null; reservations:number; estimated_sales:number };
 type RequestRow = { id:string; request_type:"create"|"reactivate"; target_account_id?:string|null; requested_email?:string|null; first_name?:string|null; last_name?:string|null; requested_role?:string|null; status:string; created_at:string };
-type Dashboard = {
-  retailer:{ id:string; trade_name:string; legal_name:string; tax_id:string; status:string; user_limit:number; inactivity_days:number };
-  current_user:{ account_id:string; email:string; role:"admin"|"counter" };
-  permissions:{ can_view_all_sales:boolean; can_request_users:boolean };
-  user_capacity:{ active:number; total:number; limit:number };
-  members:Member[];
-  requests:RequestRow[];
-  reservations:Array<{ id:string; reference:string; product_name:string; contact_name:string; price_display?:string; status:string; sold_by_account_id?:string|null; created_at:string }>;
-  counter_performance:Performance[];
-  commissions:Array<{ currency:string; accumulated:number; pending:number }>;
-};
+type Dashboard = { retailer:{ id:string; trade_name:string; legal_name:string; tax_id:string; status:string; user_limit:number; inactivity_days:number }; current_user:{ account_id:string; email:string; role:"admin"|"counter" }; permissions:{ can_view_all_sales:boolean; can_request_users:boolean }; user_capacity:{ active:number; total:number; limit:number }; members:Member[]; requests:RequestRow[]; reservations:Array<{ id:string; reference:string; product_name:string; contact_name:string; price_display?:string; status:string; sold_by_account_id?:string|null; created_at:string }>; counter_performance:Performance[]; commissions:Array<{ currency:string; accumulated:number; pending:number }> };
+type Credentials={username:string;temporary_password:string;must_change_password:boolean};
 
-const dateText = (value?: string | null) => value ? new Intl.DateTimeFormat("es-PE", { dateStyle:"medium" }).format(new Date(value)) : "Nunca";
-const money = (amount:number, currency="USD") => new Intl.NumberFormat("es-PE", { style:"currency", currency }).format(amount || 0);
+const dateText=(value?:string|null)=>value?new Intl.DateTimeFormat("es-PE",{dateStyle:"medium"}).format(new Date(value)):"Nunca";
+const money=(amount:number,currency="USD")=>new Intl.NumberFormat("es-PE",{style:"currency",currency}).format(amount||0);
 
-export default function AgencyPage() {
-  const [data,setData] = useState<Dashboard|null>(null);
-  const [message,setMessage] = useState("Cargando tu agencia…");
-  const [busy,setBusy] = useState("");
-  const [form,setForm] = useState({ first_name:"", last_name:"", email:"", role:"counter" as "admin"|"counter" });
-
-  async function load() {
-    const response = await fetch("/api/agency/dashboard", { cache:"no-store" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.message || "No pudimos cargar la agencia.");
-    setData(payload);
-  }
-
-  useEffect(() => { load().catch((e) => setMessage(e instanceof Error ? e.message : "No pudimos cargar tu agencia.")); }, []);
-
-  async function logout() {
-    setMessage("Cerrando sesión…");
-    await fetch("/api/auth/logout", { method:"POST" });
-    window.location.replace("/acceso");
-  }
-
-  async function requestUser() {
-    setBusy("create"); setMessage("");
-    try {
-      const response = await fetch("/api/agency/user-requests", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ request_type:"create", ...form }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.message || "No pudimos registrar la solicitud.");
-      setForm({ first_name:"", last_name:"", email:"", role:"counter" });
-      setMessage("Solicitud enviada a Rumbo para creación del usuario.");
-      await load();
-    } catch (e) { setMessage(e instanceof Error ? e.message : "No pudimos registrar la solicitud."); }
-    finally { setBusy(""); }
-  }
-
-  async function requestReactivation(accountId:string) {
-    setBusy(accountId); setMessage("");
-    try {
-      const response = await fetch("/api/agency/user-requests", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ request_type:"reactivate", target_account_id:accountId }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.message || "No pudimos pedir la reactivación.");
-      setMessage("Reactivación solicitada a Rumbo."); await load();
-    } catch(e) { setMessage(e instanceof Error ? e.message : "No pudimos pedir la reactivación."); }
-    finally { setBusy(""); }
-  }
-
-  const totalSales = useMemo(() => data?.counter_performance.reduce((sum,row) => sum + Number(row.estimated_sales || 0),0) || 0,[data]);
-  const totalReservations = useMemo(() => data?.counter_performance.reduce((sum,row) => sum + Number(row.reservations || 0),0) || 0,[data]);
-
-  if (!data) return <main className={styles.loading}>{message}</main>;
-  const admin = data.current_user.role === "admin";
-
-  return (
-    <main className={styles.page}>
-      <aside className={styles.sidebar}>
-        <Link className={styles.brand} href="/">rumbo<span>.</span></Link>
-        <p>Agencia minorista</p>
-        <nav>
-          <a className={styles.active} href="#resumen"><Building2 /> Resumen</a>
-          <a href="#usuarios"><UsersRound /> Usuarios</a>
-          <a href="#ventas"><CircleDollarSign /> Ventas</a>
-        </nav>
-        <button onClick={logout} type="button"><LogOut /> Cerrar sesión</button>
-      </aside>
-
-      <section className={styles.content}>
-        <header>
-          <div><p className={styles.eyebrow}>Portal de agencia</p><h1>{data.retailer.trade_name}</h1><p>{data.retailer.legal_name} · RUC {data.retailer.tax_id}</p></div>
-          <span className={styles.status}>{data.retailer.status === "active" ? "Activa" : "Alta pendiente"}</span>
-        </header>
-
-        {message ? <div className={styles.notice}>{message}</div> : null}
-
-        <div className={styles.cards} id="resumen">
-          <article><span>Tu rol</span><strong>{admin ? "Administrador" : "Counter"}</strong><p>{admin ? "Ves toda la operación de la agencia." : "Ves únicamente tus propias ventas."}</p></article>
-          <article><span>Reservas</span><strong>{totalReservations}</strong><p>{admin ? "Total de la agencia" : "Tus reservas"}</p></article>
-          <article><span>Venta estimada</span><strong>{money(totalSales)}</strong><p>Acumulado de las reservas atribuidas.</p></article>
-        </div>
-
-        <section className={styles.panelBlock} id="usuarios">
-          <div className={styles.panelHeader}><div><p className={styles.eyebrow}>Equipo comercial</p><h2>Usuarios de la agencia</h2><p>Rumbo crea y reactiva los accesos. Un usuario sin ingreso durante {data.retailer.inactivity_days} días queda desactivado.</p></div><strong>{data.user_capacity.total}/{data.user_capacity.limit} usuarios</strong></div>
-          <div className={styles.tableWrap}><table><thead><tr><th>Usuario</th><th>Rol</th><th>Último ingreso</th><th>Estado</th>{admin ? <th>Acción</th> : null}</tr></thead><tbody>{data.members.map((m) => <tr key={m.account_id}><td><strong>{m.first_name} {m.last_name}</strong><small>{m.email}</small></td><td>{m.member_role === "admin" ? "Administrador" : "Counter"}</td><td>{dateText(m.last_login_at)}</td><td><span className={styles.userStatus}>{m.display_status === "inactive_30d" ? "Inactivo 30 días" : m.status === "active" ? "Activo" : m.status}</span></td>{admin ? <td>{m.display_status === "inactive_30d" || m.status === "disabled" ? <button className={styles.smallButton} disabled={busy===m.account_id} onClick={() => requestReactivation(m.account_id)}><RefreshCcw size={15}/> Solicitar reactivación</button> : "—"}</td> : null}</tr>)}</tbody></table></div>
-
-          {admin ? <div className={styles.requestBox}><div><p className={styles.eyebrow}>Nuevo acceso</p><h3>Solicitar usuario a Rumbo</h3><p>La agencia solicita; el administrador mayorista crea el acceso.</p></div><div className={styles.formGrid}><input placeholder="Nombres" value={form.first_name} onChange={(e)=>setForm(v=>({...v,first_name:e.target.value}))}/><input placeholder="Apellidos" value={form.last_name} onChange={(e)=>setForm(v=>({...v,last_name:e.target.value}))}/><input type="email" placeholder="Correo" value={form.email} onChange={(e)=>setForm(v=>({...v,email:e.target.value}))}/><select value={form.role} onChange={(e)=>setForm(v=>({...v,role:e.target.value as "admin"|"counter"}))}><option value="counter">Counter</option><option value="admin">Administrador</option></select><button disabled={busy==="create"} onClick={requestUser}><UserPlus size={16}/>{busy==="create"?"Enviando…":"Solicitar usuario"}</button></div></div> : null}
-
-          {admin && data.requests.length ? <div className={styles.requests}><h3>Solicitudes recientes</h3>{data.requests.slice(0,8).map((r)=><div key={r.id}><span>{r.request_type === "create" ? `Alta · ${r.requested_email}` : "Reactivación de usuario"}</span><strong>{r.status}</strong></div>)}</div> : null}
-        </section>
-
-        <section className={styles.panelBlock} id="ventas">
-          <div className={styles.panelHeader}><div><p className={styles.eyebrow}>Productividad</p><h2>{admin ? "Ventas por counter" : "Mis ventas"}</h2><p>Cada reserva conserva la agencia y el usuario que la vendió.</p></div></div>
-          <div className={styles.tableWrap}><table><thead><tr><th>Counter</th><th>Rol</th><th>Reservas</th><th>Venta estimada</th><th>Último ingreso</th></tr></thead><tbody>{data.counter_performance.map((p)=><tr key={p.account_id}><td><strong>{p.first_name} {p.last_name}</strong></td><td>{p.member_role === "admin" ? "Administrador" : "Counter"}</td><td>{p.reservations}</td><td>{money(p.estimated_sales)}</td><td>{dateText(p.last_login_at)}</td></tr>)}</tbody></table></div>
-        </section>
+export default function AgencyPage(){
+  const [data,setData]=useState<Dashboard|null>(null),[message,setMessage]=useState("Cargando tu agencia…"),[busy,setBusy]=useState(""),[credentials,setCredentials]=useState<Credentials|null>(null);
+  const [form,setForm]=useState({first_name:"",last_name:"",email:"",role:"counter" as "admin"|"counter"});
+  async function load(){const response=await fetch("/api/agency/dashboard",{cache:"no-store"});const payload=await response.json();if(!response.ok)throw new Error(payload.message||"No pudimos cargar la agencia.");setData(payload)}
+  useEffect(()=>{load().catch(e=>setMessage(e instanceof Error?e.message:"No pudimos cargar tu agencia."))},[]);
+  async function logout(){setMessage("Cerrando sesión…");await fetch("/api/auth/logout",{method:"POST"});window.location.replace("/acceso")}
+  async function createPerson(){setBusy("create");setMessage("");try{const response=await fetch("/api/agency/people",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(form)});const payload=await response.json();if(!response.ok)throw new Error(payload.message||"No pudimos crear la persona.");setCredentials(payload.credentials);setForm({first_name:"",last_name:"",email:"",role:"counter"});await load()}catch(e){setMessage(e instanceof Error?e.message:"No pudimos crear la persona.")}finally{setBusy("")}}
+  async function requestReactivation(accountId:string){setBusy(accountId);setMessage("");try{const response=await fetch("/api/agency/user-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({request_type:"reactivate",target_account_id:accountId})});const payload=await response.json();if(!response.ok)throw new Error(payload.message||"No pudimos pedir la reactivación.");setMessage("Reactivación solicitada a Rumbo.");await load()}catch(e){setMessage(e instanceof Error?e.message:"No pudimos pedir la reactivación.")}finally{setBusy("")}}
+  const totalSales=useMemo(()=>data?.counter_performance.reduce((sum,row)=>sum+Number(row.estimated_sales||0),0)||0,[data]);
+  const totalReservations=useMemo(()=>data?.counter_performance.reduce((sum,row)=>sum+Number(row.reservations||0),0)||0,[data]);
+  if(!data)return <main className={styles.loading}>{message}</main>;
+  const admin=data.current_user.role==="admin";
+  return <main className={styles.page}><aside className={styles.sidebar}><Link className={styles.brand} href="/">rumbo<span>.</span></Link><p>Agencia minorista</p><nav><a className={styles.active} href="#resumen"><Building2/> Resumen</a><a href="#usuarios"><UsersRound/> Usuarios</a><a href="#ventas"><CircleDollarSign/> Ventas</a></nav><button onClick={logout} type="button"><LogOut/> Cerrar sesión</button></aside>
+    <section className={styles.content}><header><div><p className={styles.eyebrow}>Portal de agencia</p><h1>{data.retailer.trade_name}</h1><p>{data.retailer.legal_name} · RUC {data.retailer.tax_id}</p></div><span className={styles.status}>{data.retailer.status==="active"?"Activa":"Alta pendiente"}</span></header>{message?<div className={styles.notice}>{message}</div>:null}
+      <div className={styles.cards} id="resumen"><article><span>Tu rol</span><strong>{admin?"Administrador":"Counter"}</strong><p>{admin?"Ves toda la operación de la agencia.":"Ves únicamente tus propias ventas."}</p></article><article><span>Reservas</span><strong>{totalReservations}</strong><p>{admin?"Total de la agencia":"Tus reservas"}</p></article><article><span>Venta estimada</span><strong>{money(totalSales)}</strong><p>Acumulado de las reservas atribuidas.</p></article></div>
+      <section className={styles.panelBlock} id="usuarios"><div className={styles.panelHeader}><div><p className={styles.eyebrow}>Equipo comercial</p><h2>Personas de la agencia</h2><p>Los administradores pueden crear usuarios dentro del cupo disponible. Un usuario sin ingreso durante {data.retailer.inactivity_days} días queda desactivado.</p></div><strong>{data.user_capacity.total}/{data.user_capacity.limit} usuarios</strong></div>
+        <div className={styles.tableWrap}><table><thead><tr><th>Usuario</th><th>Rol</th><th>Último ingreso</th><th>Estado</th>{admin?<th>Acción</th>:null}</tr></thead><tbody>{data.members.map(m=><tr key={m.account_id}><td><strong>{m.first_name} {m.last_name}</strong><small>{m.email}</small></td><td>{m.member_role==="admin"?"Administrador":"Counter"}</td><td>{dateText(m.last_login_at)}</td><td><span className={styles.userStatus}>{m.display_status==="inactive_30d"?"Inactivo 30 días":m.status==="active"?"Activo":m.status}</span></td>{admin?<td>{m.display_status==="inactive_30d"||m.status==="disabled"?<button className={styles.smallButton} disabled={busy===m.account_id} onClick={()=>requestReactivation(m.account_id)}><RefreshCcw size={15}/> Solicitar reactivación</button>:"—"}</td>:null}</tr>)}</tbody></table></div>
+        {admin?<div className={styles.requestBox}><div><p className={styles.eyebrow}>Nueva persona</p><h3>Crear acceso</h3><p>El usuario se crea inmediatamente y la contraseña temporal se muestra una sola vez.</p></div><div className={styles.formGrid}><input placeholder="Nombres" value={form.first_name} onChange={e=>setForm(v=>({...v,first_name:e.target.value}))}/><input placeholder="Apellidos" value={form.last_name} onChange={e=>setForm(v=>({...v,last_name:e.target.value}))}/><input type="email" placeholder="Correo" value={form.email} onChange={e=>setForm(v=>({...v,email:e.target.value}))}/><select value={form.role} onChange={e=>setForm(v=>({...v,role:e.target.value as "admin"|"counter"}))}><option value="counter">Counter</option><option value="admin">Administrador</option></select><button disabled={busy==="create"||data.user_capacity.total>=data.user_capacity.limit} onClick={createPerson}><UserPlus size={16}/>{busy==="create"?"Creando…":"Nueva persona"}</button></div></div>:null}
       </section>
-    </main>
-  );
+      <section className={styles.panelBlock} id="ventas"><div className={styles.panelHeader}><div><p className={styles.eyebrow}>Productividad</p><h2>{admin?"Ventas por counter":"Mis ventas"}</h2><p>Cada reserva conserva la agencia y el usuario que la vendió.</p></div></div><div className={styles.tableWrap}><table><thead><tr><th>Counter</th><th>Rol</th><th>Reservas</th><th>Venta estimada</th><th>Último ingreso</th></tr></thead><tbody>{data.counter_performance.map(p=><tr key={p.account_id}><td><strong>{p.first_name} {p.last_name}</strong></td><td>{p.member_role==="admin"?"Administrador":"Counter"}</td><td>{p.reservations}</td><td>{money(p.estimated_sales)}</td><td>{dateText(p.last_login_at)}</td></tr>)}</tbody></table></div></section>
+    </section>
+    {credentials?<div onClick={()=>setCredentials(null)} style={{position:"fixed",inset:0,background:"rgba(16,24,40,.55)",display:"grid",placeItems:"center",zIndex:1000,padding:20}}><div onClick={e=>e.stopPropagation()} style={{width:"min(480px,100%)",background:"white",borderRadius:14,padding:20,boxShadow:"0 24px 80px rgba(0,0,0,.28)"}}><h2 style={{marginTop:0}}>Persona creada</h2><p style={{color:"#667085"}}>Entrega estas credenciales al usuario. La contraseña deberá cambiarse posteriormente.</p><div style={{background:"#f8fafc",padding:14,borderRadius:10}}><small>Usuario</small><b style={{display:"block",fontSize:17}}>{credentials.username}</b><small style={{display:"block",marginTop:10}}>Contraseña temporal</small><b style={{display:"block",fontSize:20}}>{credentials.temporary_password}</b></div><button onClick={()=>setCredentials(null)} style={{marginTop:14,border:0,borderRadius:8,padding:"9px 13px",background:"#10223f",color:"white",fontWeight:800}}>Entendido</button></div></div>:null}
+  </main>
 }
