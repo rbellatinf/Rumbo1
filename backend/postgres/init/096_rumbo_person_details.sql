@@ -21,14 +21,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS rumbo_retailer_members_document_uidx
   ON rumbo_retailer_members(document_type, document_number)
   WHERE document_number IS NOT NULL;
 
-CREATE OR REPLACE VIEW rumbo_internal_user_summary AS
-SELECT a.id AS account_id,i.first_name,i.last_name,i.internal_role,i.phone,i.job_title,
-       i.document_type,i.document_number,i.date_of_birth,
-       a.email,a.status,a.last_login_at,a.must_change_password,a.created_at
+-- PostgreSQL no permite CREATE OR REPLACE VIEW cuando cambia el nombre/orden
+-- de las columnas existentes. Estas vistas son de lectura administrativa, por
+-- lo que las recreamos explícitamente para mantener la migración idempotente.
+DROP VIEW IF EXISTS rumbo_internal_user_summary;
+CREATE VIEW rumbo_internal_user_summary AS
+SELECT
+  a.id AS account_id,
+  i.first_name,
+  i.last_name,
+  i.internal_role,
+  i.phone,
+  i.job_title,
+  i.document_type,
+  i.document_number,
+  i.date_of_birth,
+  a.email,
+  a.status,
+  a.last_login_at,
+  a.must_change_password,
+  a.created_at
 FROM rumbo_internal_members i
 JOIN rumbo_accounts a ON a.id=i.account_id;
 
-CREATE OR REPLACE VIEW rumbo_retailer_user_summary AS
+DROP VIEW IF EXISTS rumbo_retailer_user_summary;
+CREATE VIEW rumbo_retailer_user_summary AS
 SELECT
   m.retailer_id,
   m.account_id,
