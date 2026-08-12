@@ -118,23 +118,35 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE VIEW rumbo_retailer_user_summary AS
-SELECT
-  m.retailer_id,
-  m.account_id,
-  m.first_name,
-  m.last_name,
-  m.member_role,
-  a.email,
-  a.status,
-  a.last_login_at,
-  a.created_at,
-  m.disabled_at,
-  m.disabled_reason,
-  CASE
-    WHEN a.status = 'active' THEN 'active'
-    WHEN m.disabled_reason = 'inactivity_30d' THEN 'inactive_30d'
-    ELSE a.status
-  END AS display_status
-FROM rumbo_retailer_members m
-JOIN rumbo_accounts a ON a.id = m.account_id;
+-- 096 amplía esta vista con teléfono/documento/fecha de nacimiento. Como
+-- db:prepare vuelve a ejecutar 090 en cada arranque, no debemos reemplazar una
+-- versión posterior con menos columnas: PostgreSQL lo rechaza con
+-- "cannot drop columns from view". La vista base se crea solo si aún no existe.
+DO $$
+BEGIN
+  IF to_regclass('public.rumbo_retailer_user_summary') IS NULL THEN
+    EXECUTE $view$
+      CREATE VIEW rumbo_retailer_user_summary AS
+      SELECT
+        m.retailer_id,
+        m.account_id,
+        m.first_name,
+        m.last_name,
+        m.member_role,
+        a.email,
+        a.status,
+        a.last_login_at,
+        a.created_at,
+        m.disabled_at,
+        m.disabled_reason,
+        CASE
+          WHEN a.status = 'active' THEN 'active'
+          WHEN m.disabled_reason = 'inactivity_30d' THEN 'inactive_30d'
+          ELSE a.status
+        END AS display_status
+      FROM rumbo_retailer_members m
+      JOIN rumbo_accounts a ON a.id = m.account_id
+    $view$;
+  END IF;
+END;
+$$;
