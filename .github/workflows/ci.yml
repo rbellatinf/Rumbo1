@@ -109,6 +109,9 @@ jobs:
       - name: Install Rumbo API dependencies
         run: cd backend/rumbo-api && npm install --omit=dev
 
+      - name: Smoke test Rumbo API imports
+        run: cd backend/rumbo-api && node -e "import('./src/integration-config-routes.mjs')"
+
       - name: Seed minimal Spree catalog fixture
         shell: bash
         run: |
