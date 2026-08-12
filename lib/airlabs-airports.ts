@@ -84,27 +84,18 @@ export async function searchAirports(rawKeyword:string):Promise<AirportSearchRes
     const payload=(await response.json()) as AirLabsResponse;if(payload.error)throw new Error(payload.error.message||payload.error.code||"AirLabs error");
     const suggestions=payload.response||payload;
     const countries=new Map((suggestions.countries??[]).filter(country=>country.code&&country.name).map(country=>[country.code!.trim().toUpperCase(),country.name!.trim()]));
-    let providerAirports=[
-      ...(suggestions.airports??[]),
-      ...(suggestions.airports_by_cities??[]),
-      ...(suggestions.airports_by_countries??[]),
-    ];
+    let providerAirports=[...(suggestions.airports??[]),...(suggestions.airports_by_cities??[]),...(suggestions.airports_by_countries??[])];
     const matchedCountry=countryMatch(keyword,suggestions.countries??[]);
-    if(matchedCountry?.code){
+    // Name Suggestion ya puede devolver airports_by_countries. Solo hacemos una
+    // segunda consulta si reconoció el país pero no devolvió ningún aeropuerto.
+    if(matchedCountry?.code&&providerAirports.length===0){
       const countryCode=matchedCountry.code.trim().toUpperCase();
       const countryQuery=new URLSearchParams({country_code:countryCode,api_key:apiKey,_fields:"name,iata_code,icao_code,city,city_code,country_code,popularity,is_major,is_international"});
       const countryResponse=await fetch(`${baseUrl}/airports?${countryQuery.toString()}`,{headers:{accept:"application/json"},cache:"no-store",signal:controller.signal});
-      if(countryResponse.ok){
-        const countryPayload=(await countryResponse.json()) as AirLabsAirportListResponse;
-        providerAirports=[...providerAirports,...airportList(countryPayload)];
-        if(matchedCountry.name) countries.set(countryCode,matchedCountry.name);
-      }
+      if(countryResponse.ok){const countryPayload=(await countryResponse.json()) as AirLabsAirportListResponse;providerAirports=[...providerAirports,...airportList(countryPayload)];if(matchedCountry.name)countries.set(countryCode,matchedCountry.name)}
     }
     providerAirports.sort((a,b)=>Number(b.is_major||0)-Number(a.is_major||0)||Number(b.is_international||0)-Number(a.is_international||0)||Number(b.popularity||0)-Number(a.popularity||0));
-    const airports=uniqueOptions([
-      ...(suggestions.cities??[]).map(city=>mapCity(city,countries)).filter((option):option is AirportOption=>option!==null),
-      ...providerAirports.map(airport=>mapAirport(airport,countries)).filter((option):option is AirportOption=>option!==null),
-    ]).slice(0,60);
+    const airports=uniqueOptions([...(suggestions.cities??[]).map(city=>mapCity(city,countries)).filter((option):option is AirportOption=>option!==null),...providerAirports.map(airport=>mapAirport(airport,countries)).filter((option):option is AirportOption=>option!==null)]).slice(0,60);
     recordIntegrationCall({integrationCode:"airlabs",serviceCode:"airport-suggest",source:"storefront",success:true,httpStatus:response.status,durationMs:Date.now()-started,requestSummary:{query:keyword,country_code:matchedCountry?.code||null},responseSummary:{results:airports.length}});
     return{mode:"live",provider:"AirLabs",airports,message:matchedCountry?.code?`Aeropuertos de ${regionName(matchedCountry.code,matchedCountry.name)} consultados en AirLabs.`:"Aeropuertos consultados en AirLabs."};
   }catch(error){
