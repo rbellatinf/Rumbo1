@@ -68,17 +68,19 @@ export const integrationRegistry:IntegrationDefinition[]=[
       {rumboField:"payment_status",providerField:"orderStatus",direction:"API → Rumbo",type:"string",required:true,rule:"normalización a pending/paid/failed"},
     ]},
   ]},
-  {code:"cloudflare-r2",name:"Cloudflare R2",category:"Imágenes / objetos",environment:"Production",credentialLabel:"Cloudflare API Token",configurationFields:[
-    {key:"account_id",label:"Account ID",kind:"public",type:"text",required:true},
+  {code:"cloudflare-r2",name:"Cloudflare R2",category:"Imágenes / objetos",environment:"Production · S3 compatible",credentialLabel:"R2 Access Key",configurationFields:[
+    {key:"account_id",label:"Account ID",kind:"public",type:"text",required:true,helper:"ID de la cuenta Cloudflare; forma el endpoint S3 de R2."},
     {key:"bucket",label:"Bucket",kind:"public",type:"text",required:true,placeholder:"rumbo-images"},
-    {key:"public_base_url",label:"URL pública",kind:"public",type:"url"},
-    {key:"api_token",label:"API Token",kind:"secret",type:"password",required:true},
+    {key:"public_base_url",label:"URL pública",kind:"public",type:"url",required:true,helper:"Dominio público usado para servir las imágenes después de subirlas."},
+    {key:"access_key_id",label:"Access Key ID",kind:"secret",type:"password",required:true,helper:"Se genera al crear el R2 API token con Object Read & Write."},
+    {key:"secret_access_key",label:"Secret Access Key",kind:"secret",type:"password",required:true,helper:"Se muestra una sola vez en Cloudflare; Rumbo la guarda cifrada."},
   ],services:[
-    {code:"image-upload",name:"Subir imagen de producto",method:"PUT",endpoint:"/r2/buckets/rumbo-images/objects/{key}",description:"Almacena imágenes del catálogo y devuelve referencia pública.",mappings:[
-      {rumboField:"image.file",providerField:"body",direction:"Rumbo → API",type:"binary",required:true},
-      {rumboField:"storage_key",providerField:"object key",direction:"Bidireccional",type:"string",required:true},
-      {rumboField:"image_url",providerField:"public domain + object key",direction:"API → Rumbo",type:"url",required:true},
-      {rumboField:"bucket_name",providerField:"rumbo-images",direction:"API → Rumbo",type:"string",rule:"constante"},
+    {code:"image-upload",name:"Subir imagen de producto",method:"PUT",endpoint:"S3 presigned PUT · /{bucket}/{key}",description:"Rumbo API firma una URL S3 temporal restringida al objeto y Content-Type; el storefront sube sin recibir las credenciales R2.",mappings:[
+      {rumboField:"image.file",providerField:"PutObject body",direction:"Rumbo → API",type:"binary",required:true},
+      {rumboField:"image.content_type",providerField:"Content-Type signed header",direction:"Rumbo → API",type:"string",required:true,rule:"JPG/PNG/WebP/GIF"},
+      {rumboField:"storage_key",providerField:"Key",direction:"Bidireccional",type:"string",required:true,rule:"catalog/YYYY/MM/uuid.ext"},
+      {rumboField:"image_url",providerField:"public_base_url + Key",direction:"API → Rumbo",type:"url",required:true},
+      {rumboField:"bucket_name",providerField:"Bucket",direction:"API → Rumbo",type:"string",rule:"restringido a rumbo-images"},
     ]},
   ]},
   {code:"spree",name:"Spree",category:"Legacy commerce",environment:"Legacy",legacy:true,credentialLabel:"SPREE_API_URL",services:[
