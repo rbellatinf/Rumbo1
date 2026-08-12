@@ -1,5 +1,5 @@
 import { demoTravelPackages, type TravelPackage } from "./travel-packages.ts";
-import { recordIntegrationCall } from "./integration-telemetry";
+import { recordIntegrationCall } from "./integration-telemetry.ts";
 
 export type PackageSearchInput={originIata:string;destinationIata:string;destinationName:string;departureDate:string;returnDate:string;adults:number;currency:string};
 export type PackageSearchResult={mode:"demo"|"live";provider:"PriceTravel";packages:TravelPackage[];message:string};
