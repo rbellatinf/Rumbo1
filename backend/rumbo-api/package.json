@@ -8,10 +8,11 @@
     "start": "node src/public-edge.mjs",
     "start:core": "node src/server.mjs",
     "start:gateway": "node src/gateway.mjs",
-    "start:real": "npm run db:prepare && npm run db:migrate-spree && npm run db:validate-spree && npm run db:verify && node src/public-edge.mjs",
+    "start:real": "npm run db:prepare && npm run db:migrate-spree && npm run db:migrate-spree-images && npm run db:validate-spree && npm run db:verify && node src/public-edge.mjs",
     "dev": "node --watch src/public-edge.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
     "db:migrate-spree": "node scripts/migrate-spree-catalog.mjs",
+    "db:migrate-spree-images": "node scripts/migrate-spree-images.mjs",
     "db:validate-spree": "node scripts/validate-spree-catalog.mjs",
     "db:verify": "node scripts/verify-db.mjs",
     "seed:demo": "node scripts/seed-demo.mjs"
