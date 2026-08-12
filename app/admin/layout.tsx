@@ -4,13 +4,17 @@ import AdminLayoutClient from "./AdminLayoutClient";
 export default function AdminLayout({children}:{children:ReactNode}){
   return <div className="rumbo-admin-root">
     <style>{`
-      /* AdminLayoutClient used to hide the complete page until it found the
-         sidebar in the DOM. When overview/API initialization failed or was
-         slow, that turned a recoverable loading state into a blank screen. */
-      .rumbo-admin-root [style*="visibility: hidden"][style*="height: 0"] {
+      /* The base Admin must never disappear while client-side enhancements
+         initialize. React serializes inline styles without guaranteed spaces,
+         so do not depend on matching the literal style attribute. */
+      .rumbo-admin-root > div > div:first-of-type {
         visibility: visible !important;
         height: auto !important;
         overflow: visible !important;
+      }
+      .rumbo-admin-root [style*="visibility:hidden"],
+      .rumbo-admin-root [style*="visibility: hidden"] {
+        visibility: visible !important;
       }
     `}</style>
     <AdminLayoutClient>{children}</AdminLayoutClient>
