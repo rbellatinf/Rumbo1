@@ -41,7 +41,7 @@ export const integrationRegistry:IntegrationDefinition[]=[
     ]},
   ]},
   {code:"izipay",name:"Izipay",category:"Pagos",environment:"MiCuentaWeb / Krypton",credentialLabel:"REST credentials + HMAC",services:[
-    {code:"payment-session",name:"Crear sesión de pago",method:"POST",endpoint:"/api-payment/V4/Charge/CreatePayment",description:"Genera el formulario/token de pago para una reserva.",mappings:[
+    {code:"payment-session",name:"Crear sesión de pago",method:"POST",endpoint:"/api-payment/V4/Charge/CreatePayment",description:"Integración objetivo directa con Izipay. Mientras exista tráfico en Spree / Sesión de pago legacy, el checkout aún no está totalmente desacoplado.",mappings:[
       {rumboField:"booking.reference",providerField:"orderId",direction:"Rumbo → API",type:"string",required:true},
       {rumboField:"total_amount",providerField:"amount",direction:"Rumbo → API",type:"integer",required:true,rule:"monto en unidad mínima"},
       {rumboField:"currency",providerField:"currency",direction:"Rumbo → API",type:"string",required:true},
@@ -66,6 +66,11 @@ export const integrationRegistry:IntegrationDefinition[]=[
       {rumboField:"rumbo_catalog_products",providerField:"spree_products",direction:"API → Rumbo",type:"entity",rule:"migración con lineage"},
       {rumboField:"rumbo_catalog_departures",providerField:"spree_variants + spree_prices",direction:"API → Rumbo",type:"entity"},
       {rumboField:"rumbo_catalog_images",providerField:"active_storage / assets",direction:"API → Rumbo",type:"entity"},
+    ]},
+    {code:"legacy-payment-session",name:"Sesión de pago legacy",method:"POST",endpoint:"/api/v3/store/booking_requests/{reference}/payment_session",description:"Dependencia productiva todavía existente: Rumbo Storefront solicita a Spree preparar la sesión de pago. Este contador debe llegar a cero antes de retirar Spree.",mappings:[
+      {rumboField:"booking.reference",providerField:"booking_requests/{reference}",direction:"Rumbo → API",type:"string",required:true},
+      {rumboField:"contact_email",providerField:"email",direction:"Rumbo → API",type:"email",required:true,rule:"no se persiste en logs de observabilidad"},
+      {rumboField:"payment_session",providerField:"payment_session",direction:"API → Rumbo",type:"object",required:true},
     ]},
   ]},
 ];
