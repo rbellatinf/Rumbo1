@@ -1,0 +1,160 @@
+import crypto from "node:crypto";
+
+const clean=(value)=>String(value??"").trim();
+const normalize=(value)=>clean(value).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+
+const DEFINITIONS={
+  airlabs:{
+    publicKeys:["base_url"],secretKeys:["api_key"],requiredSecrets:["api_key"],
+    defaults:{base_url:"https://airlabs.co/api/v9"},
+    env:{base_url:"AIRLABS_API_BASE_URL",api_key:"AIRLABS_API_KEY"},
+  },
+  pricetravel:{
+    publicKeys:["api_url","packages_path"],secretKeys:["username","password"],requiredPublic:["api_url","packages_path"],requiredSecrets:["username","password"],
+    defaults:{},env:{api_url:"PRICETRAVEL_API_URL",packages_path:"PRICETRAVEL_PACKAGES_PATH",username:"PRICETRAVEL_USERNAME",password:"PRICETRAVEL_PASSWORD"},
+  },
+  izipay:{
+    publicKeys:["api_url"],secretKeys:["username","password","public_key","hmac_key"],requiredPublic:["api_url"],requiredSecrets:["username","password"],
+    defaults:{api_url:"https://api.micuentaweb.pe"},env:{api_url:"IZIPAY_API_URL",username:"IZIPAY_USERNAME",password:"IZIPAY_PASSWORD",public_key:"IZIPAY_PUBLIC_KEY",hmac_key:"IZIPAY_HMAC_SHA256_KEY"},
+  },
+  "cloudflare-r2":{
+    publicKeys:["account_id","bucket","public_base_url"],secretKeys:["api_token"],requiredPublic:["account_id","bucket"],requiredSecrets:["api_token"],
+    defaults:{bucket:"rumbo-images"},env:{account_id:"CLOUDFLARE_ACCOUNT_ID",bucket:"CLOUDFLARE_R2_BUCKET",public_base_url:"CLOUDFLARE_R2_PUBLIC_BASE_URL",api_token:"CLOUDFLARE_API_TOKEN"},
+  },
+};
+
+function masterKey(){
+  const raw=clean(process.env.RUMBO_INTEGRATION_MASTER_KEY);
+  if(!raw)return null;
+  return crypto.createHash("sha256").update(raw).digest();
+}
+function encryptSecrets(value){
+  const key=masterKey();if(!key)throw new Error("RUMBO_INTEGRATION_MASTER_KEY no está configurado.");
+  const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key,iv);
+  const ciphertext=Buffer.concat([cipher.update(JSON.stringify(value),"utf8"),cipher.final()]);
+  const tag=cipher.getAuthTag();
+  return {ciphertext:ciphertext.toString("base64"),iv:iv.toString("base64"),tag:tag.toString("base64")};
+}
+function decryptSecrets(row){
+  if(!row?.secret_ciphertext)return {};
+  const key=masterKey();if(!key)throw new Error("RUMBO_INTEGRATION_MASTER_KEY no está configurado.");
+  const decipher=crypto.createDecipheriv("aes-256-gcm",key,Buffer.from(row.secret_iv,"base64"));
+  decipher.setAuthTag(Buffer.from(row.secret_tag,"base64"));
+  const plaintext=Buffer.concat([decipher.update(Buffer.from(row.secret_ciphertext,"base64")),decipher.final()]).toString("utf8");
+  const parsed=JSON.parse(plaintext);return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};
+}
+function mask(value){const text=clean(value);if(!text)return "";return `••••••••${text.slice(-4)}`}
+function envValue(def,key){const name=def.env?.[key];return name?clean(process.env[name]):""}
+
+async function storedRow(pool,code){return (await pool.query(`SELECT * FROM rumbo_integration_configs WHERE integration_code=$1 LIMIT 1`,[code])).rows[0]||null}
+async function resolvedConfig(pool,code){
+  const def=DEFINITIONS[code];if(!def)return null;
+  const row=await storedRow(pool,code),storedSecrets=row?decryptSecrets(row):{};
+  const publicConfig={...def.defaults};
+  for(const key of def.publicKeys||[]){const fromEnv=envValue(def,key);if(fromEnv)publicConfig[key]=fromEnv}
+  if(row?.public_config&&typeof row.public_config==="object")for(const key of def.publicKeys||[]){const value=clean(row.public_config[key]);if(value)publicConfig[key]=value}
+  const secrets={};for(const key of def.secretKeys||[]){const fromEnv=envValue(def,key);if(fromEnv)secrets[key]=fromEnv;const stored=clean(storedSecrets[key]);if(stored)secrets[key]=stored}
+  const requiredPublic=def.requiredPublic||[],requiredSecrets=def.requiredSecrets||[];
+  const configured=requiredPublic.every(key=>clean(publicConfig[key]))&&requiredSecrets.every(key=>clean(secrets[key]));
+  const source=row&&(row.secret_ciphertext||Object.keys(row.public_config||{}).length)?"admin":configured?"environment":"none";
+  const secretMask={};for(const key of def.secretKeys||[]){const savedMask=clean(row?.secret_mask?.[key]);secretMask[key]=savedMask||mask(secrets[key])}
+  return {code,def,row,publicConfig,secrets,secretMask,configured,source};
+}
+
+function safeUrl(value,fallback=""){const text=clean(value||fallback).replace(/\/$/,"");if(!text)return "";try{return new URL(text).toString().replace(/\/$/,"")}catch{return ""}}
+async function timedFetch(url,init={},timeoutMs=7000){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs),started=Date.now();try{const response=await fetch(url,{...init,signal:controller.signal,cache:"no-store"});return{response,duration:Date.now()-started}}finally{clearTimeout(timer)}}
+
+async function probeConfig(pool,code){
+  const cfg=await resolvedConfig(pool,code);if(!cfg?.configured)return{success:false,http_status:null,duration_ms:0,message:"Faltan campos obligatorios de configuración."};
+  try{
+    if(code==="airlabs"){
+      const base=safeUrl(cfg.publicConfig.base_url,"https://airlabs.co/api/v9"),query=new URLSearchParams({q:"LIM",lang:"es",api_key:cfg.secrets.api_key,_fields:"name,iata_code,city,country_code"});
+      const {response,duration}=await timedFetch(`${base}/suggest?${query}`);const payload=await response.json().catch(()=>({}));const success=response.ok&&!payload?.error;
+      return{success,http_status:response.status,duration_ms:duration,message:success?"AirLabs respondió correctamente.":"AirLabs rechazó la conexión.",details:{test_query:"LIM"}};
+    }
+    if(code==="pricetravel"){
+      const base=safeUrl(cfg.publicConfig.api_url),path=clean(cfg.publicConfig.packages_path),endpoint=path.startsWith("/")?path:`/${path}`,auth=Buffer.from(`${cfg.secrets.username}:${cfg.secrets.password}`).toString("base64");
+      const {response,duration}=await timedFetch(`${base}${endpoint}`,{headers:{accept:"application/json",authorization:`Basic ${auth}`}});const success=response.status<500&&![401,403].includes(response.status);
+      return{success,http_status:response.status,duration_ms:duration,message:success?"PriceTravel es alcanzable y aceptó las credenciales.":"PriceTravel rechazó la conexión o credenciales."};
+    }
+    if(code==="izipay"){
+      const base=safeUrl(cfg.publicConfig.api_url,"https://api.micuentaweb.pe"),auth=Buffer.from(`${cfg.secrets.username}:${cfg.secrets.password}`).toString("base64");
+      const {response,duration}=await timedFetch(base,{headers:{accept:"application/json",authorization:`Basic ${auth}`}});const success=response.status<500&&![401,403].includes(response.status);
+      return{success,http_status:response.status,duration_ms:duration,message:success?"Izipay es alcanzable con las credenciales guardadas.":"Izipay rechazó la conexión o credenciales."};
+    }
+    if(code==="cloudflare-r2"){
+      const account=clean(cfg.publicConfig.account_id),bucket=clean(cfg.publicConfig.bucket),url=`https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/domains/managed`;
+      const {response,duration}=await timedFetch(url,{headers:{Authorization:`Bearer ${cfg.secrets.api_token}`,accept:"application/json"}});const payload=await response.json().catch(()=>({}));const success=response.ok&&payload?.success!==false;
+      return{success,http_status:response.status,duration_ms:duration,message:success?`Cloudflare R2 respondió para ${bucket}.`:`Cloudflare R2 rechazó la conexión.`};
+    }
+    return{success:false,http_status:null,duration_ms:0,message:"No existe prueba para esta integración."};
+  }catch(error){return{success:false,http_status:null,duration_ms:0,message:error instanceof Error?error.message:"La prueba falló."}}
+}
+
+function levenshtein(a,b){const m=a.length,n=b.length,dp=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){let prev=dp[0];dp[0]=i;for(let j=1;j<=n;j++){const old=dp[j],cost=a[i-1]===b[j-1]?0:1;dp[j]=Math.min(dp[j]+1,dp[j-1]+1,prev+cost);prev=old}}return dp[n]}
+let countryIndexCache=null;
+function countryIndex(){
+  if(countryIndexCache)return countryIndexCache;
+  const locales=["es","en","fr"],items=[];
+  for(let a=65;a<=90;a++)for(let b=65;b<=90;b++){
+    const code=String.fromCharCode(a,b),names=new Set();
+    for(const locale of locales){try{const value=new Intl.DisplayNames([locale],{type:"region"}).of(code);if(value&&value!==code)names.add(value)}catch{}}
+    if(names.size)items.push({code,names:[...names]});
+  }
+  countryIndexCache=items;return items;
+}
+function resolveCountry(query){
+  const q=normalize(query);if(q.length<4)return null;
+  let best=null;
+  for(const item of countryIndex())for(const name of item.names){const n=normalize(name);if(!n)continue;if(n===q)return{code:item.code,name};const dist=levenshtein(q,n);const threshold=q.length>=7?2:1;if(dist<=threshold&&(!best||dist<best.dist))best={code:item.code,name,dist}}
+  return best?{code:best.code,name:best.name}:null;
+}
+function countryName(code){try{return new Intl.DisplayNames(["es"],{type:"region"}).of(code)||code}catch{return code}}
+function mapAirport(item){const iata=clean(item?.iata_code).toUpperCase();if(!/^[A-Z]{3}$/.test(iata))return null;const name=clean(item?.name)||iata,city=clean(item?.city)||name,cc=clean(item?.country_code).toUpperCase();return{id:`AIRPORT-${clean(item?.icao_code)||iata}`,iataCode:iata,name,cityName:city,countryName:countryName(cc),subType:"AIRPORT",label:`${city} (${iata}) · ${name}${cc?`, ${countryName(cc)}`:""}`}}
+function listPayload(payload){if(Array.isArray(payload))return payload;if(Array.isArray(payload?.response))return payload.response;return[]}
+
+export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
+  app.get('/api/admin/integration-configs',requireAdmin,async(_req,res)=>{
+    try{const integrations=[];for(const code of Object.keys(DEFINITIONS)){const cfg=await resolvedConfig(pool,code);integrations.push({code,configured:cfg.configured,source:cfg.source,public_config:cfg.publicConfig,secret_mask:cfg.secretMask,last_tested_at:cfg.row?.last_tested_at||null,last_test_success:cfg.row?.last_test_success??null,last_test_message:cfg.row?.last_test_message||null,updated_at:cfg.row?.updated_at||null})}res.json({integrations,master_key_configured:Boolean(masterKey())})}
+    catch(error){console.error(error);res.status(500).json({error:{message:'No pudimos leer la configuración de integraciones.'}})}
+  });
+
+  app.put('/api/admin/integration-configs/:code',requireAdmin,async(req,res)=>{
+    const code=clean(req.params.code),def=DEFINITIONS[code];if(!def)return res.status(404).json({error:{message:'Integración no administrable desde Rumbo.'}});if(!masterKey())return res.status(503).json({error:{message:'Falta la llave maestra de cifrado de integraciones.'}});
+    try{
+      const current=await storedRow(pool,code),oldSecrets=current?decryptSecrets(current):{},publicInput=req.body?.public_config&&typeof req.body.public_config==='object'&&!Array.isArray(req.body.public_config)?req.body.public_config:{},secretInput=req.body?.secrets&&typeof req.body.secrets==='object'&&!Array.isArray(req.body.secrets)?req.body.secrets:{};
+      const publicConfig={};for(const key of def.publicKeys||[]){const value=clean(publicInput[key]);if(value)publicConfig[key]=value}
+      const secrets={...oldSecrets};for(const key of def.secretKeys||[]){const value=clean(secretInput[key]);if(value)secrets[key]=value}
+      const encrypted=encryptSecrets(secrets),secretMask={};for(const key of def.secretKeys||[])secretMask[key]=mask(secrets[key]);
+      const {rows}=await pool.query(`INSERT INTO rumbo_integration_configs(integration_code,public_config,secret_ciphertext,secret_iv,secret_tag,secret_mask,configured_by_account_id,configured_at,updated_at) VALUES($1,$2::jsonb,$3,$4,$5,$6::jsonb,$7,now(),now()) ON CONFLICT(integration_code) DO UPDATE SET public_config=EXCLUDED.public_config,secret_ciphertext=EXCLUDED.secret_ciphertext,secret_iv=EXCLUDED.secret_iv,secret_tag=EXCLUDED.secret_tag,secret_mask=EXCLUDED.secret_mask,configured_by_account_id=EXCLUDED.configured_by_account_id,configured_at=now(),updated_at=now() RETURNING updated_at`,[code,JSON.stringify(publicConfig),encrypted.ciphertext,encrypted.iv,encrypted.tag,JSON.stringify(secretMask),req.adminSession.account_id||null]);
+      await audit(req.adminSession.email,'integration.config_updated','integration',code,{public_fields:Object.keys(publicConfig),secret_fields:Object.keys(secretInput).filter(key=>clean(secretInput[key]))});
+      const cfg=await resolvedConfig(pool,code);res.json({integration:{code,configured:cfg.configured,source:cfg.source,public_config:cfg.publicConfig,secret_mask:cfg.secretMask,updated_at:rows[0].updated_at}});
+    }catch(error){console.error(error);res.status(500).json({error:{message:'No pudimos guardar la configuración cifrada.'}})}
+  });
+
+  app.post('/api/admin/integration-configs/:code/test',requireAdmin,async(req,res)=>{
+    const code=clean(req.params.code);if(!DEFINITIONS[code])return res.status(404).json({error:{message:'Integración no administrable.'}});
+    const result=await probeConfig(pool,code);await pool.query(`INSERT INTO rumbo_integration_configs(integration_code,last_tested_at,last_test_success,last_test_message,updated_at) VALUES($1,now(),$2,$3,now()) ON CONFLICT(integration_code) DO UPDATE SET last_tested_at=now(),last_test_success=$2,last_test_message=$3,updated_at=now()`,[code,result.success,result.message]);
+    await audit(req.adminSession.email,'integration.connection_test','integration',code,{success:result.success,http_status:result.http_status,duration_ms:result.duration_ms});
+    res.status(result.success?200:502).json({test:result});
+  });
+
+  app.get('/api/integrations/airlabs/airports',async(req,res)=>{
+    const q=clean(req.query.q).slice(0,80);if(q.length<2)return res.status(422).json({error:{message:'Escribe al menos dos caracteres.'}});
+    try{
+      const cfg=await resolvedConfig(pool,'airlabs');if(!cfg?.configured)return res.status(503).json({error:{message:'AirLabs no está configurada en Administración → APIs.'}});
+      const base=safeUrl(cfg.publicConfig.base_url,'https://airlabs.co/api/v9'),country=resolveCountry(q),started=Date.now();let providerRows=[],responseStatus=200;
+      if(country){
+        const params=new URLSearchParams({country_code:country.code,api_key:cfg.secrets.api_key,_fields:'name,iata_code,icao_code,city,city_code,country_code,popularity,is_major,is_international'});
+        const attempt=await timedFetch(`${base}/airports?${params}`);responseStatus=attempt.response.status;if(!attempt.response.ok)throw new Error(`AirLabs airports returned ${attempt.response.status}`);providerRows=listPayload(await attempt.response.json());
+      }else{
+        const params=new URLSearchParams({q,lang:'es',api_key:cfg.secrets.api_key,_fields:'name,iata_code,icao_code,city,city_code,country_code,popularity,is_major,is_international'});
+        const attempt=await timedFetch(`${base}/suggest?${params}`);responseStatus=attempt.response.status;if(!attempt.response.ok)throw new Error(`AirLabs suggest returned ${attempt.response.status}`);const payload=await attempt.response.json(),source=payload?.response||payload;providerRows=[...(source?.airports||[]),...(source?.airports_by_cities||[]),...(source?.airports_by_countries||[])];
+      }
+      providerRows.sort((a,b)=>Number(b?.is_major||0)-Number(a?.is_major||0)||Number(b?.is_international||0)-Number(a?.is_international||0)||Number(b?.popularity||0)-Number(a?.popularity||0));
+      const seen=new Set(),airports=[];for(const item of providerRows){const mapped=mapAirport(item);if(!mapped||seen.has(mapped.iataCode))continue;seen.add(mapped.iataCode);airports.push(mapped);if(airports.length>=60)break}
+      try{await pool.query(`INSERT INTO rumbo_integration_calls(integration_code,service_code,source,success,http_status,duration_ms,request_summary,response_summary) VALUES('airlabs','airport-suggest','storefront',true,$1,$2,$3::jsonb,$4::jsonb)`,[responseStatus,Date.now()-started,JSON.stringify({query:q,country_code:country?.code||null}),JSON.stringify({results:airports.length})])}catch{}
+      res.json({mode:'live',provider:'AirLabs',airports,message:country?`Aeropuertos de ${countryName(country.code)} consultados en AirLabs.`:'Aeropuertos consultados en AirLabs.'});
+    }catch(error){console.error(error);res.status(502).json({error:{message:error instanceof Error?error.message:'AirLabs no respondió.'}})}
+  });
+}
