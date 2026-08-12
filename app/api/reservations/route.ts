@@ -50,6 +50,16 @@ async function validAutomaticReferral(code: string | undefined) {
   }
 }
 
+function nativeProductId(product: { id: string; providerReference?: string }) {
+  if (product.providerReference?.startsWith("rumbo:")) {
+    return product.providerReference.slice("rumbo:".length).trim() || null;
+  }
+  if (product.id.startsWith("rumbo:")) {
+    return product.id.slice("rumbo:".length).trim() || null;
+  }
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   let raw: unknown;
   try { raw = await request.json(); }
@@ -63,10 +73,13 @@ export async function POST(request: NextRequest) {
     const booking = parseBookingInput(source);
     const apiPayload = toBookingApiPayload(booking);
     const rumbo = accessConfiguration();
-    const nativeReference = booking.product.id.startsWith("rumbo:") ? booking.product.id.slice(6) : null;
+    const nativeReference = nativeProductId(booking.product);
     const sessionToken = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
 
     if (rumbo?.kind === "rumbo" && nativeReference) {
+      // El storefront muestra el slug como product.id, pero la UUID nativa viaja
+      // en providerReference="rumbo:<uuid>". Debemos persistir contra esa UUID
+      // para que la reserva llegue a rumbo_booking_requests y al backoffice.
       apiPayload.spree_product_id = nativeReference;
       const upstream = await fetch(`${rumbo.apiUrl}/api/bookings`, {
         method: "POST",
