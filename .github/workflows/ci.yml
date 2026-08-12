@@ -45,12 +45,14 @@ jobs:
         with:
           node-version: "22.14.0"
 
-      - name: Validate migration scripts
+      - name: Validate backend and migration scripts
         run: |
           node --check backend/rumbo-api/scripts/migrate-spree-catalog.mjs
           node --check backend/rumbo-api/scripts/migrate-spree-images.mjs
           node --check backend/rumbo-api/scripts/validate-spree-catalog.mjs
           node --check backend/rumbo-api/scripts/prepare-db.mjs
+          node --check backend/rumbo-api/src/integration-observability-routes.mjs
+          node --check backend/rumbo-api/src/user-management-routes.mjs
 
   database-migrations:
     runs-on: ubuntu-latest
