@@ -11,6 +11,30 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function enrichCloudflareAsset(body: Record<string, unknown>) {
+  const url = typeof body.url === "string" ? body.url.trim() : "";
+  if (!url || body.storage_key) return body;
+  try {
+    const parsed = new URL(url);
+    const path = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+    if (!path.startsWith("catalog/")) return body;
+    return {
+      ...body,
+      storage_provider: "cloudflare-r2",
+      storage_key: path,
+      bucket_name: "rumbo-images",
+      metadata: {
+        ...(body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+          ? body.metadata
+          : {}),
+        public_host: parsed.host,
+      },
+    };
+  } catch {
+    return body;
+  }
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -26,7 +50,8 @@ export async function POST(
   }
 
   const { id } = await context.params;
-  const body = await request.json().catch(() => ({}));
+  const incoming = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const body = enrichCloudflareAsset(incoming);
   const upstream = await fetch(
     `${provider.apiUrl}/api/admin/catalog/${encodeURIComponent(id)}/images`,
     {
