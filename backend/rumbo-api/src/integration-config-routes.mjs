@@ -114,6 +114,16 @@ function mapAirport(item){const iata=clean(item?.iata_code).toUpperCase();if(!/^
 function listPayload(payload){if(Array.isArray(payload))return payload;if(Array.isArray(payload?.response))return payload.response;return[]}
 
 export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
+  // Compatibility fix: this handler runs before the older person-detail route and
+  // restores agency fields required by the DNI popup. Other person types continue
+  // to the existing handler below in user-management-routes.
+  app.get('/api/admin/person-detail',requireAdmin,async(req,res,next)=>{
+    if(clean(req.query.type)!=='retailer')return next();
+    const id=clean(req.query.id);if(!id)return res.status(422).json({error:{message:'Identificador obligatorio.'}});
+    const {rows}=await pool.query(`SELECT m.account_id,m.retailer_id,m.first_name,m.last_name,m.member_role,m.phone,m.document_type,m.document_number,m.date_of_birth,m.created_at,a.email,a.status,a.last_login_at,r.trade_name,r.legal_name,r.tax_id FROM rumbo_retailer_members m JOIN rumbo_accounts a ON a.id=m.account_id JOIN rumbo_retailers r ON r.id=m.retailer_id WHERE m.account_id=$1 LIMIT 1`,[id]);
+    if(!rows[0])return res.status(404).json({error:{message:'Persona no encontrada.'}});return res.json({person:{...rows[0],person_type:'retailer'}});
+  });
+
   app.get('/api/admin/integration-configs',requireAdmin,async(_req,res)=>{
     try{const integrations=[];for(const code of Object.keys(DEFINITIONS)){const cfg=await resolvedConfig(pool,code);integrations.push({code,configured:cfg.configured,source:cfg.source,public_config:cfg.publicConfig,secret_mask:cfg.secretMask,last_tested_at:cfg.row?.last_tested_at||null,last_test_success:cfg.row?.last_test_success??null,last_test_message:cfg.row?.last_test_message||null,updated_at:cfg.row?.updated_at||null})}res.json({integrations,master_key_configured:Boolean(masterKey())})}
     catch(error){console.error(error);res.status(500).json({error:{message:'No pudimos leer la configuración de integraciones.'}})}
