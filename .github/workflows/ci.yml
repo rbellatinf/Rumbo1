@@ -51,6 +51,7 @@ jobs:
           node --check backend/rumbo-api/scripts/migrate-spree-images.mjs
           node --check backend/rumbo-api/scripts/validate-spree-catalog.mjs
           node --check backend/rumbo-api/scripts/prepare-db.mjs
+          node --check backend/rumbo-api/scripts/sync-world-test-catalog-images.mjs
           node --check backend/rumbo-api/src/integration-observability-routes.mjs
           node --check backend/rumbo-api/src/integration-config-routes.mjs
           node --check backend/rumbo-api/src/user-management-routes.mjs
@@ -106,11 +107,21 @@ jobs:
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
           done
 
+      - name: Validate world storefront seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_products WHERE metadata->>'test_group'='storefront-world'")" = "4"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_departures d JOIN rumbo_catalog_products p ON p.id=d.product_id WHERE p.metadata->>'test_group'='storefront-world'")" = "4"
+
       - name: Install Rumbo API dependencies
         run: cd backend/rumbo-api && npm install --omit=dev
 
-      - name: Smoke test Rumbo API imports
-        run: cd backend/rumbo-api && node -e "import('./src/integration-config-routes.mjs')"
+      - name: Smoke test Rumbo API imports and R2 seed sync
+        run: |
+          cd backend/rumbo-api
+          node -e "import('./src/integration-config-routes.mjs')"
+          node scripts/sync-world-test-catalog-images.mjs
 
       - name: Seed minimal Spree catalog fixture
         shell: bash
