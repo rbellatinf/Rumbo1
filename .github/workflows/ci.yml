@@ -32,3 +32,48 @@ jobs:
 
       - name: Test
         run: npm test
+
+  database-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: rumbo
+          POSTGRES_PASSWORD: rumbo-ci
+          POSTGRES_DB: rumbo_production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rumbo -d rumbo_production"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: rumbo-ci
+      DATABASE_URL: postgresql://rumbo:rumbo-ci@127.0.0.1:5432/rumbo_production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+
+      - name: Apply complete Rumbo schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in backend/postgres/init/*.sql; do
+            echo "Applying ${file}"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+          done
+
+      - name: Reapply complete schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in backend/postgres/init/*.sql; do
+            echo "Reapplying ${file}"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+          done
