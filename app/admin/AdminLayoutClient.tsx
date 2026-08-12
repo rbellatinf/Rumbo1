@@ -3,11 +3,12 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useState } from "react";
 import UsersPanel from "./UsersPanel";
+import CatalogPanel from "./CatalogPanel";
 import PricingPanel from "./PricingPanel";
 
 const tabLabels:Record<string,string>={summary:"Resumen",reservations:"Reservas",partners:"Partners",retailers:"Agencias",commissions:"Comisiones",audit:"Auditoría"};
 type ModalKind="agency"|"person"|"partner"|"agencyDetail"|"personDetail"|null;
-type EmbeddedModule="users"|"pricing"|null;
+type EmbeddedModule="users"|"catalog"|"pricing"|null;
 type Agency={id:string;trade_name:string;legal_name:string;tax_id:string;contact_email?:string;phone?:string;status?:string;member_count?:number;[key:string]:unknown};
 type Credentials={username:string;temporary_password:string};
 type PersonDetail={person_type:string;account_id:string;first_name:string;last_name:string;email:string;status:string;phone?:string|null;document_type?:string|null;document_number?:string|null;date_of_birth?:string|null;last_login_at?:string|null;internal_role?:string;member_role?:string;job_title?:string|null;referral_code?:string|null;trade_name?:string|null;tax_id?:string|null;created_at?:string|null;commission_rate?:number;network_commission_rate?:number};
@@ -24,18 +25,25 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
     check();const observer=new MutationObserver(check);observer.observe(document.body,{subtree:true,childList:true});return()=>observer.disconnect();
   },[isMain]);
 
-  useEffect(()=>{if(!isMain||!adminReady)return;const requested=searchParams.get("tab"),label=requested?tabLabels[requested]:null;if(!label)return;setEmbedded(null);const timer=window.setTimeout(()=>{const buttons=Array.from(document.querySelectorAll("main aside nav button")) as HTMLButtonElement[];buttons.find(b=>b.textContent?.trim().includes(label))?.click()},0);return()=>window.clearTimeout(timer)},[isMain,adminReady,searchParams]);
+  useEffect(()=>{
+    if(!isMain||!adminReady)return;
+    const requestedTab=searchParams.get("tab");
+    if(requestedTab&&tabLabels[requestedTab])setEmbedded(null);
+  },[isMain,adminReady,searchParams]);
 
   useEffect(()=>{
     if(!isMain||!adminReady)return;
-    const requested=searchParams.get("module");if(requested==="users"||requested==="pricing")setEmbedded(requested);
+    const requested=searchParams.get("module");
+    const next:EmbeddedModule=requested==="users"||requested==="catalog"||requested==="pricing"?requested:null;
+    setEmbedded(next);
     const nav=document.querySelector("main aside nav");if(!nav)return;
-    const makeLink=(module:EmbeddedModule,label:string,svg:string)=>{const a=document.createElement("a");a.href=`/admin?module=${module}`;a.className="rumbo-extra-nav";a.dataset.rumboExtra="true";a.dataset.module=module||"";a.innerHTML=`${svg}<span>${label}</span>`;return a};
+    const makeLink=(module:Exclude<EmbeddedModule,null>,label:string,svg:string)=>{const a=document.createElement("a");a.href=`/admin?module=${module}`;a.className="rumbo-extra-nav";a.dataset.rumboExtra="true";a.dataset.module=module;a.innerHTML=`${svg}<span>${label}</span>`;return a};
     const commissions=Array.from(nav.querySelectorAll("button")).find(b=>b.textContent?.includes("Comisiones"))||null;
     if(!nav.querySelector('[data-module="users"]'))nav.insertBefore(makeLink("users","Usuarios",'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>'),commissions);
+    if(!nav.querySelector('[data-module="catalog"]'))nav.insertBefore(makeLink("catalog","Catálogo",'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 12 2l8 3.5v13L12 22l-8-3.5v-13ZM4 5.5l8 3.5 8-3.5M12 9v13"/></svg>'),commissions);
     if(!nav.querySelector('[data-module="pricing"]'))nav.insertBefore(makeLink("pricing","Pricing",'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41 11 3.83V3H4v7h.83l9.58 9.59a2 2 0 0 0 2.82 0l3.36-3.36a2 2 0 0 0 0-2.82ZM7.5 7.5h.01"/></svg>'),commissions);
     return()=>nav.querySelectorAll('[data-rumbo-extra="true"]').forEach(el=>el.remove());
-  },[isMain,adminReady]);
+  },[isMain,adminReady,searchParams]);
 
   useEffect(()=>{
     if(!isMain||!adminReady)return;
@@ -70,7 +78,7 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
   useEffect(()=>{
     const click=(event:MouseEvent)=>{
       const target=event.target as HTMLElement;
-      const extra=target.closest(".rumbo-extra-nav") as HTMLAnchorElement|null;if(extra){event.preventDefault();setEmbedded(extra.dataset.module as EmbeddedModule);history.replaceState(null,"",`/admin?module=${extra.dataset.module}`);return}
+      const extra=target.closest(".rumbo-extra-nav") as HTMLAnchorElement|null;if(extra){event.preventDefault();const requested=extra.dataset.module;const next:EmbeddedModule=requested==="users"||requested==="catalog"||requested==="pricing"?requested:null;setEmbedded(next);if(next)history.replaceState(null,"",`/admin?module=${next}`);return}
       if(target.closest("main aside nav button")){setEmbedded(null);return}
       const personButton=target.closest(".rumbo-person-doc-link") as HTMLButtonElement|null;if(personButton){event.preventDefault();event.stopPropagation();const type=personButton.dataset.personType,id=personButton.dataset.personId;if(type&&id){setPersonDetail(null);setModal("personDetail");fetch(`/api/admin/user-management?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`,{cache:"no-store"}).then(r=>r.json()).then(p=>{if(p.person)setPersonDetail(p.person)}).catch(()=>{})}return}
       const anchor=target.closest("a") as HTMLAnchorElement|null;if(anchor){const url=new URL(anchor.href,location.origin);if(url.pathname==="/admin/agencias/nueva"){event.preventDefault();setModal("agency");setError("");return}if(url.pathname==="/admin/agencias/personas/nueva"){event.preventDefault();const id=url.searchParams.get("retailer")||"";setRetailerId(id);setSelectedAgency(null);setModal("person");setError("");fetch("/api/admin/overview",{cache:"no-store"}).then(r=>r.json()).then(p=>{const agency=(p.retailers||[]).find((a:Agency)=>a.id===id);if(agency)setSelectedAgency(agency)}).catch(()=>{});return}if(url.pathname==="/admin/partners/nuevo"){event.preventDefault();setModal("partner");setError("");return}}
@@ -86,11 +94,13 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
   async function submitPerson(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/user-management",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"agency_person",retailer_id:retailerId,...Object.fromEntries(f.entries())})}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear la persona.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear la persona.")}finally{setBusy(false)}}
   async function submitPartner(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");try{const f=new FormData(e.currentTarget),r=await fetch("/api/admin/partners",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f.entries()))}),p=await r.json();if(!r.ok)throw new Error(p.message||"No pudimos crear el Partner.");setCredentials(p.credentials)}catch(e){setError(e instanceof Error?e.message:"No pudimos crear el Partner.")}finally{setBusy(false)}}
 
+  const embeddedPanel=embedded==="users"?<UsersPanel/>:embedded==="catalog"?<CatalogPanel/>:embedded==="pricing"?<PricingPanel/>:null;
+
   return <div className={`${collapsed&&isMain?"rumbo-admin-collapsed ":""}${embedded?"rumbo-admin-embedded":""}`}>
     {isMain&&adminReady&&collapsed?<div className="rumbo-collapsed-r" aria-hidden="true"><span className="letter">R</span><span className="dot">.</span></div>:null}
     {isMain&&adminReady?<button aria-label={collapsed?"Expandir menú":"Contraer menú"} title={collapsed?"Expandir menú":"Contraer menú"} onClick={()=>setCollapsed(v=>!v)} className="rumbo-menu-toggle">☰</button>:null}
     <div style={isMain&&!adminReady?{visibility:"hidden",height:0,overflow:"hidden"}:undefined}>{children}</div>
-    {isMain&&adminReady&&embedded?<div className="rumbo-embedded-content">{embedded==="users"?<UsersPanel/>:<PricingPanel/>}</div>:null}
+    {isMain&&adminReady&&embedded?<div className="rumbo-embedded-content">{embeddedPanel}</div>:null}
     {modal?<div style={overlay} onMouseDown={e=>{if(e.target===e.currentTarget)closeModal()}}><div style={modalBox}>
       {modal==="person"&&selectedAgency?<div style={agencyBadge}><span style={{fontSize:10,color:"#667085",textTransform:"uppercase",letterSpacing:".08em",fontWeight:800}}>Agencia seleccionada</span><strong style={{display:"block",marginTop:2,fontSize:14,color:"#17233b"}}>{selectedAgency.trade_name}</strong><small style={{display:"block",marginTop:1,color:"#667085"}}>RUC {selectedAgency.tax_id}</small></div>:null}
       <button onClick={closeModal} style={closeButton} aria-label="Cerrar">×</button>
@@ -108,6 +118,8 @@ export default function AdminLayoutClient({children}:{children:ReactNode}){
       main aside nav .rumbo-extra-nav{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:10px;color:#667085;text-decoration:none;font-weight:700;box-sizing:border-box}
       main aside nav .rumbo-extra-nav:hover,main aside nav .rumbo-extra-active{background:#102b50!important;color:white!important}
       main aside nav .rumbo-extra-nav svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+      .rumbo-admin-embedded main aside nav button{background:transparent!important;color:#667085!important;box-shadow:none!important}
+      .rumbo-admin-embedded main aside nav button svg{color:#667085!important}
       .rumbo-admin-embedded main[class]>section{visibility:hidden!important}
       .rumbo-embedded-content{position:fixed;z-index:25;top:0;right:0;bottom:0;left:260px;overflow:auto;background:#f6f7f9;padding:28px 32px;transition:left .2s ease}
       .rumbo-admin-collapsed .rumbo-embedded-content{left:72px}
