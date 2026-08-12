@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const clean=(value)=>String(value??"").trim();
 const normalize=(value)=>clean(value).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
@@ -18,10 +20,13 @@ const DEFINITIONS={
     defaults:{api_url:"https://api.micuentaweb.pe"},env:{api_url:"IZIPAY_API_URL",username:"IZIPAY_USERNAME",password:"IZIPAY_PASSWORD",public_key:"IZIPAY_PUBLIC_KEY",hmac_key:"IZIPAY_HMAC_SHA256_KEY"},
   },
   "cloudflare-r2":{
-    publicKeys:["account_id","bucket","public_base_url"],secretKeys:["api_token"],requiredPublic:["account_id","bucket"],requiredSecrets:["api_token"],
-    defaults:{bucket:"rumbo-images"},env:{account_id:"CLOUDFLARE_ACCOUNT_ID",bucket:"CLOUDFLARE_R2_BUCKET",public_base_url:"CLOUDFLARE_R2_PUBLIC_BASE_URL",api_token:"CLOUDFLARE_API_TOKEN"},
+    publicKeys:["account_id","bucket","public_base_url"],secretKeys:["access_key_id","secret_access_key"],requiredPublic:["account_id","bucket","public_base_url"],requiredSecrets:["access_key_id","secret_access_key"],
+    defaults:{bucket:"rumbo-images"},env:{account_id:"CLOUDFLARE_ACCOUNT_ID",bucket:"CLOUDFLARE_R2_BUCKET",public_base_url:"CLOUDFLARE_R2_PUBLIC_BASE_URL",access_key_id:"CLOUDFLARE_ACCESS_KEY_ID",secret_access_key:"CLOUDFLARE_SECRET_ACCESS_KEY"},
   },
 };
+
+const R2_IMAGE_TYPES={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif"};
+const R2_MAX_IMAGE_BYTES=10*1024*1024;
 
 function masterKey(){
   const raw=clean(process.env.RUMBO_INTEGRATION_MASTER_KEY);
@@ -63,6 +68,18 @@ async function resolvedConfig(pool,code){
 
 function safeUrl(value,fallback=""){const text=clean(value||fallback).replace(/\/$/,"");if(!text)return "";try{return new URL(text).toString().replace(/\/$/,"")}catch{return ""}}
 async function timedFetch(url,init={},timeoutMs=7000){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs),started=Date.now();try{const response=await fetch(url,{...init,signal:controller.signal,cache:"no-store"});return{response,duration:Date.now()-started}}finally{clearTimeout(timer)}}
+function r2Endpoint(accountId){return `https://${clean(accountId)}.r2.cloudflarestorage.com`}
+function r2Client(cfg){
+  return new S3Client({
+    region:"auto",
+    endpoint:r2Endpoint(cfg.publicConfig.account_id),
+    credentials:{accessKeyId:clean(cfg.secrets.access_key_id),secretAccessKey:clean(cfg.secrets.secret_access_key)},
+  });
+}
+function publicObjectUrl(base,key){
+  const root=safeUrl(base);if(!root)return "";
+  return `${root}/${String(key).split("/").map(part=>encodeURIComponent(part)).join("/")}`;
+}
 
 async function probeConfig(pool,code){
   const cfg=await resolvedConfig(pool,code);if(!cfg?.configured)return{success:false,http_status:null,duration_ms:0,message:"Faltan campos obligatorios de configuración."};
@@ -83,9 +100,10 @@ async function probeConfig(pool,code){
       return{success,http_status:response.status,duration_ms:duration,message:success?"Izipay es alcanzable con las credenciales guardadas.":"Izipay rechazó la conexión o credenciales."};
     }
     if(code==="cloudflare-r2"){
-      const account=clean(cfg.publicConfig.account_id),bucket=clean(cfg.publicConfig.bucket),url=`https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/domains/managed`;
-      const {response,duration}=await timedFetch(url,{headers:{Authorization:`Bearer ${cfg.secrets.api_token}`,accept:"application/json"}});const payload=await response.json().catch(()=>({}));const success=response.ok&&payload?.success!==false;
-      return{success,http_status:response.status,duration_ms:duration,message:success?`Cloudflare R2 respondió para ${bucket}.`:`Cloudflare R2 rechazó la conexión.`};
+      const started=Date.now(),client=r2Client(cfg),bucket=clean(cfg.publicConfig.bucket);
+      const result=await client.send(new ListObjectsV2Command({Bucket:bucket,MaxKeys:1}));
+      const httpStatus=Number(result?.$metadata?.httpStatusCode||200);
+      return{success:httpStatus>=200&&httpStatus<300,http_status:httpStatus,duration_ms:Date.now()-started,message:`Cloudflare R2 S3 respondió para ${bucket}.`,details:{bucket,objects_visible:Number(result?.KeyCount||0),endpoint:r2Endpoint(cfg.publicConfig.account_id),test_mode:"read_only"}};
     }
     return{success:false,http_status:null,duration_ms:0,message:"No existe prueba para esta integración."};
   }catch(error){return{success:false,http_status:null,duration_ms:0,message:error instanceof Error?error.message:"La prueba falló."}}
@@ -134,7 +152,7 @@ export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
     try{
       const current=await storedRow(pool,code),oldSecrets=current?decryptSecrets(current):{},publicInput=req.body?.public_config&&typeof req.body.public_config==='object'&&!Array.isArray(req.body.public_config)?req.body.public_config:{},secretInput=req.body?.secrets&&typeof req.body.secrets==='object'&&!Array.isArray(req.body.secrets)?req.body.secrets:{};
       const publicConfig={};for(const key of def.publicKeys||[]){const value=clean(publicInput[key]);if(value)publicConfig[key]=value}
-      const secrets={...oldSecrets};for(const key of def.secretKeys||[]){const value=clean(secretInput[key]);if(value)secrets[key]=value}
+      const secrets={};for(const key of def.secretKeys||[]){const old=clean(oldSecrets[key]);if(old)secrets[key]=old;const value=clean(secretInput[key]);if(value)secrets[key]=value}
       const encrypted=encryptSecrets(secrets),secretMask={};for(const key of def.secretKeys||[])secretMask[key]=mask(secrets[key]);
       const {rows}=await pool.query(`INSERT INTO rumbo_integration_configs(integration_code,public_config,secret_ciphertext,secret_iv,secret_tag,secret_mask,configured_by_account_id,configured_at,updated_at) VALUES($1,$2::jsonb,$3,$4,$5,$6::jsonb,$7,now(),now()) ON CONFLICT(integration_code) DO UPDATE SET public_config=EXCLUDED.public_config,secret_ciphertext=EXCLUDED.secret_ciphertext,secret_iv=EXCLUDED.secret_iv,secret_tag=EXCLUDED.secret_tag,secret_mask=EXCLUDED.secret_mask,configured_by_account_id=EXCLUDED.configured_by_account_id,configured_at=now(),updated_at=now() RETURNING updated_at`,[code,JSON.stringify(publicConfig),encrypted.ciphertext,encrypted.iv,encrypted.tag,JSON.stringify(secretMask),req.adminSession.account_id||null]);
       await audit(req.adminSession.email,'integration.config_updated','integration',code,{public_fields:Object.keys(publicConfig),secret_fields:Object.keys(secretInput).filter(key=>clean(secretInput[key]))});
@@ -147,6 +165,21 @@ export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
     const result=await probeConfig(pool,code);await pool.query(`INSERT INTO rumbo_integration_configs(integration_code,last_tested_at,last_test_success,last_test_message,updated_at) VALUES($1,now(),$2,$3,now()) ON CONFLICT(integration_code) DO UPDATE SET last_tested_at=now(),last_test_success=$2,last_test_message=$3,updated_at=now()`,[code,result.success,result.message]);
     await audit(req.adminSession.email,'integration.connection_test','integration',code,{success:result.success,http_status:result.http_status,duration_ms:result.duration_ms});
     res.status(result.success?200:502).json({test:result});
+  });
+
+  app.post('/api/admin/integration-configs/cloudflare-r2/presign-upload',requireAdmin,async(req,res)=>{
+    try{
+      const cfg=await resolvedConfig(pool,'cloudflare-r2');if(!cfg?.configured)return res.status(503).json({error:{message:'Cloudflare R2 no está configurado en Administración → APIs.'}});
+      const contentType=clean(req.body?.content_type).toLowerCase(),size=Number(req.body?.size||0),extension=R2_IMAGE_TYPES[contentType];
+      if(!extension)return res.status(415).json({error:{message:'Formato no permitido. Usa JPG, PNG, WebP o GIF.'}});
+      if(!Number.isFinite(size)||size<=0||size>R2_MAX_IMAGE_BYTES)return res.status(413).json({error:{message:'La imagen debe pesar entre 1 byte y 10 MB.'}});
+      const now=new Date(),year=now.getUTCFullYear(),month=String(now.getUTCMonth()+1).padStart(2,'0'),key=`catalog/${year}/${month}/${crypto.randomUUID()}.${extension}`;
+      const bucket=clean(cfg.publicConfig.bucket),client=r2Client(cfg),command=new PutObjectCommand({Bucket:bucket,Key:key,ContentType:contentType});
+      const uploadUrl=await getSignedUrl(client,command,{expiresIn:300});
+      const publicUrl=publicObjectUrl(cfg.publicConfig.public_base_url,key);if(!publicUrl)return res.status(422).json({error:{message:'Configura la URL pública del bucket antes de subir imágenes.'}});
+      await audit(req.adminSession.email,'integration.r2_upload_presigned','integration','cloudflare-r2',{bucket,key,content_type:contentType,size,expires_in_seconds:300});
+      res.json({upload_url:uploadUrl,storage_key:key,bucket,public_url:publicUrl,content_type:contentType,expires_in_seconds:300});
+    }catch(error){console.error(error);res.status(502).json({error:{message:error instanceof Error?error.message:'No pudimos preparar la carga a Cloudflare R2.'}})}
   });
 
   app.get('/api/integrations/airlabs/airports',async(req,res)=>{
