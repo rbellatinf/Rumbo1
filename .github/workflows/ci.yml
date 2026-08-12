@@ -52,6 +52,7 @@ jobs:
           node --check backend/rumbo-api/scripts/validate-spree-catalog.mjs
           node --check backend/rumbo-api/scripts/prepare-db.mjs
           node --check backend/rumbo-api/src/integration-observability-routes.mjs
+          node --check backend/rumbo-api/src/integration-config-routes.mjs
           node --check backend/rumbo-api/src/user-management-routes.mjs
 
   database-migrations:
