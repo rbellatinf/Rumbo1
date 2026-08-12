@@ -1,0 +1,96 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+type Mapping={rumboField:string;providerField:string;direction:string;type:string;required?:boolean;rule?:string};
+type Stats={integration_code:string;service_code:string;invocations:number;successes:number;errors:number;success_rate:number|null;avg_latency_ms:number|null;p95_latency_ms:number|null;last_invocation_at?:string|null;last_success_at?:string|null;last_error_at?:string|null};
+type Service={code:string;name:string;method:string;endpoint:string;description:string;mappings:Mapping[];stats:Stats|null};
+type Integration={code:string;name:string;category:string;environment:string;legacy?:boolean;credentialLabel:string;configured:boolean;status:string;base_host:string;credential_status:string;services:Service[]};
+type Log={id:string;integration_code:string;service_code:string;trace_id:string;source:string;success:boolean;http_status:number|null;duration_ms:number|null;error_code?:string|null;error_message?:string|null;request_summary?:Record<string,unknown>;response_summary?:Record<string,unknown>;created_at:string};
+type Payload={integrations:Integration[];logs:Log[];window_hours:number};
+
+const card:React.CSSProperties={background:"white",border:"1px solid #e4e7ec",borderRadius:12,padding:14};
+const field:React.CSSProperties={width:"100%",padding:"9px 10px",border:"1px solid #cfd5df",borderRadius:7,background:"white",fontSize:13};
+const label:React.CSSProperties={display:"grid",gap:5,fontSize:11,color:"#667085",fontWeight:800,textTransform:"uppercase",letterSpacing:.3};
+const th:React.CSSProperties={textAlign:"left",padding:"7px 9px",border:"1px solid #dfe4ea",background:"#eef2f5",color:"#536273",fontSize:10,fontWeight:800,textTransform:"uppercase"};
+const td:React.CSSProperties={padding:"7px 9px",border:"1px solid #e3e7eb",fontSize:12,verticalAlign:"top"};
+const primary:React.CSSProperties={border:0,borderRadius:8,padding:"9px 13px",background:"#10223f",color:"white",fontWeight:800,cursor:"pointer"};
+const secondary:React.CSSProperties={border:"1px solid #cdd5df",borderRadius:8,padding:"8px 11px",background:"white",color:"#344054",fontWeight:800,cursor:"pointer"};
+
+function date(value?:string|null){return value?new Date(value).toLocaleString("es-PE"):"—"}
+function pct(value?:number|null){return value==null?"—":`${Number(value).toFixed(1)}%`}
+function latency(value?:number|null){return value==null?"—":`${Math.round(Number(value))} ms`}
+function pretty(value:unknown){try{return JSON.stringify(value??{},null,2)}catch{return "{}"}}
+
+export default function IntegrationsPanel(){
+  const [data,setData]=useState<Payload|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true),[hours,setHours]=useState(24),[integrationCode,setIntegrationCode]=useState("rumbo-api"),[serviceCode,setServiceCode]=useState("health"),[testing,setTesting]=useState(false),[testMessage,setTestMessage]=useState(""),[selectedLog,setSelectedLog]=useState<Log|null>(null);
+
+  async function load(nextHours=hours){
+    setLoading(true);setError("");
+    try{const response=await fetch(`/api/admin/integrations?hours=${nextHours}`,{cache:"no-store"});const payload=await response.json();if(!response.ok)throw new Error(payload.message||"No pudimos cargar las integraciones.");setData(payload);const found=(payload.integrations||[]).find((item:Integration)=>item.code===integrationCode);if(!found&&payload.integrations?.[0]){setIntegrationCode(payload.integrations[0].code);setServiceCode(payload.integrations[0].services?.[0]?.code||"")}else if(found&&!found.services.some((s:Service)=>s.code===serviceCode))setServiceCode(found.services?.[0]?.code||"")}
+    catch(e){setError(e instanceof Error?e.message:"No pudimos cargar las integraciones.")}
+    finally{setLoading(false)}
+  }
+  useEffect(()=>{void load(hours)},[hours]);
+
+  const integration=useMemo(()=>data?.integrations.find(item=>item.code===integrationCode)||null,[data,integrationCode]);
+  const service=useMemo(()=>integration?.services.find(item=>item.code===serviceCode)||integration?.services[0]||null,[integration,serviceCode]);
+  const logs=useMemo(()=>data?.logs.filter(item=>item.integration_code===integration?.code&&item.service_code===service?.code)||[],[data,integration,service]);
+  const stat=service?.stats||null;
+  const overall=useMemo(()=>{
+    const items=data?.integrations||[];return {total:items.length,configured:items.filter(i=>i.configured).length,legacy:items.filter(i=>i.legacy).length,errors:(data?.logs||[]).filter(l=>!l.success).length};
+  },[data]);
+
+  async function testConnection(){
+    if(!integration||!service)return;setTesting(true);setError("");setTestMessage("");
+    try{const response=await fetch("/api/admin/integrations",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({integration_code:integration.code,service_code:service.code})});const payload=await response.json();setTestMessage(payload?.test?.message||payload.message||"Prueba completada.");if(!response.ok)throw new Error(payload?.test?.message||payload.message||"La prueba falló.");await load(hours)}
+    catch(e){setError(e instanceof Error?e.message:"La prueba no pudo completarse.");await load(hours)}
+    finally{setTesting(false)}
+  }
+
+  if(loading&&!data)return <div style={{padding:30,color:"#667085"}}>Cargando integraciones…</div>;
+
+  return <div style={{maxWidth:1500,margin:"0 auto",color:"#17233b"}}>
+    <div style={{display:"flex",justifyContent:"space-between",gap:18,alignItems:"end",marginBottom:14,flexWrap:"wrap"}}>
+      <div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,letterSpacing:1.1,textTransform:"uppercase"}}>Rumbo · Observabilidad</p><h1 style={{fontSize:32,margin:"4px 0"}}>APIs e integraciones</h1><p style={{margin:0,color:"#667085"}}>Servicios conectados, mapping, salud, latencia, errores y trazabilidad.</p></div>
+      <label style={{...label,width:180}}>Ventana estadísticas<select value={hours} onChange={e=>setHours(Number(e.target.value))} style={field}><option value={24}>Últimas 24 h</option><option value={168}>7 días</option><option value={720}>30 días</option></select></label>
+    </div>
+
+    {error?<div style={{padding:10,border:"1px solid #fecaca",background:"#fff5f5",color:"#991b1b",borderRadius:8,marginBottom:10}}>{error}</div>:null}
+    {testMessage&&!error?<div style={{padding:10,border:"1px solid #bbf7d0",background:"#f0fdf4",color:"#166534",borderRadius:8,marginBottom:10}}>{testMessage}</div>:null}
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:12}}>
+      <Metric title="Integraciones" value={String(overall.total)} helper="registradas"/>
+      <Metric title="Configuradas" value={`${overall.configured}/${overall.total}`} helper="credenciales detectadas"/>
+      <Metric title="Legacy" value={String(overall.legacy)} helper="candidatas a retiro"/>
+      <Metric title="Errores ventana" value={String(overall.errors)} helper={`últimas ${hours===24?"24 h":hours===168?"7 días":"30 días"}`}/>
+    </div>
+
+    <section style={{...card,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:8}}>
+        {(data?.integrations||[]).map(item=><button key={item.code} onClick={()=>{setIntegrationCode(item.code);setServiceCode(item.services?.[0]?.code||"");setTestMessage("")}} style={{textAlign:"left",border:item.code===integrationCode?"2px solid #102b50":"1px solid #e4e7ec",background:item.code===integrationCode?"#f3f7fb":"white",borderRadius:10,padding:10,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:9,height:9,borderRadius:99,background:item.legacy?"#f59e0b":item.configured?"#22c55e":"#cbd5e1"}}/><strong>{item.name}</strong></div><small style={{display:"block",color:"#667085",marginTop:4}}>{item.category}</small><small style={{display:"block",color:item.configured?"#16794b":"#98a2b3",marginTop:2}}>{item.legacy?"Legacy":item.configured?"Configurada":"Sin configurar"}</small></button>)}
+      </div>
+    </section>
+
+    <section style={{...card,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(260px,1fr) auto",gap:10,alignItems:"end"}}>
+        <label style={label}>1. Integración<select value={integrationCode} onChange={e=>{const next=data?.integrations.find(i=>i.code===e.target.value);setIntegrationCode(e.target.value);setServiceCode(next?.services?.[0]?.code||"");setTestMessage("")}} style={field}>{data?.integrations.map(item=><option key={item.code} value={item.code}>{item.name}{item.legacy?" · Legacy":""}</option>)}</select></label>
+        <label style={label}>2. Servicio<select value={service?.code||""} onChange={e=>{setServiceCode(e.target.value);setTestMessage("")}} style={field}>{integration?.services.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+        <button disabled={testing||!service} onClick={()=>void testConnection()} style={{...primary,opacity:testing?.65:1,minWidth:150}}>{testing?"Probando…":"Probar conexión"}</button>
+      </div>
+      {integration&&service?<div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:8,marginTop:12}}><Info title="Estado" value={integration.legacy?"Legacy":integration.configured?"Configurada":"Pendiente"}/><Info title="Ambiente" value={integration.environment}/><Info title="Host" value={integration.base_host}/><Info title="Credencial" value={`${integration.credential_status} · ••••••••`}/><Info title="Método" value={service.method}/><Info title="Endpoint" value={service.endpoint}/><Info title="Categoría" value={integration.category}/><Info title="Servicio activo" value={integration.configured&&!integration.legacy?"Sí":"No / revisión"}/></div>:null}
+      {service?<p style={{margin:"12px 0 0",color:"#667085",fontSize:12}}>{service.description}</p>:null}
+    </section>
+
+    {service?<><section style={{...card,marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"end",gap:10,marginBottom:10}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Mapping</p><h2 style={{margin:"3px 0"}}>Campos Rumbo ↔ proveedor</h2></div><span style={{fontSize:12,color:"#667085"}}>{service.mappings.length} reglas</span></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr><th style={th}>Campo Rumbo</th><th style={th}>Campo API</th><th style={th}>Dirección</th><th style={th}>Tipo</th><th style={th}>Obligatorio</th><th style={th}>Regla / transformación</th></tr></thead><tbody>{service.mappings.map((m,index)=><tr key={`${m.rumboField}-${index}`}><td style={td}><code>{m.rumboField}</code></td><td style={td}><code>{m.providerField}</code></td><td style={td}>{m.direction}</td><td style={td}>{m.type}</td><td style={td}>{m.required?"Sí":"No"}</td><td style={td}>{m.rule||"Directo"}</td></tr>)}</tbody></table></div></section>
+
+    <section style={{...card,marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"end",marginBottom:10}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Health & stats</p><h2 style={{margin:"3px 0"}}>{integration?.name} · {service.name}</h2></div><small style={{color:"#667085"}}>Las pruebas del Admin también quedan auditadas.</small></div><div style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(0,1fr))",gap:8}}><Metric title="Invocaciones" value={String(stat?.invocations??0)} helper="registradas"/><Metric title="Éxito" value={pct(stat?.success_rate)} helper={`${stat?.errors??0} errores`}/><Metric title="Latencia prom." value={latency(stat?.avg_latency_ms)} helper="media"/><Metric title="Latencia p95" value={latency(stat?.p95_latency_ms)} helper="percentil 95"/><Metric title="Último éxito" value={stat?.last_success_at?date(stat.last_success_at):"—"} helper="última respuesta OK" small/><Metric title="Cuota" value="N/D" helper="se mostrará cuando proveedor la exponga"/></div></section>
+
+    <section style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"end",marginBottom:10}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Logs</p><h2 style={{margin:"3px 0"}}>Trazabilidad reciente</h2></div><button style={secondary} onClick={()=>void load(hours)}>Actualizar</button></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}><thead><tr><th style={th}>Hora</th><th style={th}>HTTP</th><th style={th}>ms</th><th style={th}>Resultado</th><th style={th}>Origen</th><th style={th}>Trace ID</th></tr></thead><tbody>{logs.slice(0,40).map(log=><tr key={log.id}><td style={td}>{date(log.created_at)}</td><td style={td}>{log.http_status??"—"}</td><td style={td}>{log.duration_ms??"—"}</td><td style={td}><span style={{fontWeight:800,color:log.success?"#16794b":"#b42318"}}>{log.success?"OK":"Error"}</span>{log.error_message?<small style={{display:"block",color:"#667085",marginTop:2}}>{log.error_message}</small>:null}</td><td style={td}>{log.source}</td><td style={td}><button onClick={()=>setSelectedLog(log)} style={{border:0,background:"transparent",color:"#175cd3",textDecoration:"underline",cursor:"pointer",fontFamily:"monospace",fontSize:11}}>{log.trace_id}</button></td></tr>)}</tbody></table>{logs.length===0?<div style={{padding:25,textAlign:"center",color:"#667085",border:"1px dashed #d0d5dd",borderRadius:9,marginTop:8}}>Todavía no hay invocaciones registradas para este servicio. Usa “Probar conexión” para generar la primera traza.</div>:null}</div></section></>:null}
+
+    {selectedLog?<div onMouseDown={e=>{if(e.target===e.currentTarget)setSelectedLog(null)}} style={{position:"fixed",inset:0,zIndex:2100,background:"rgba(15,23,42,.62)",display:"grid",placeItems:"center",padding:20}}><div style={{position:"relative",width:"min(900px,100%)",maxHeight:"calc(100vh - 40px)",overflowY:"auto",background:"white",borderRadius:16,padding:20}}><button onClick={()=>setSelectedLog(null)} style={{position:"absolute",right:14,top:8,border:0,background:"transparent",fontSize:28,cursor:"pointer"}}>×</button><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Trace sanitizado</p><h2 style={{margin:"4px 0"}}>{selectedLog.trace_id}</h2><div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:8,margin:"12px 0"}}><Info title="Integración" value={selectedLog.integration_code}/><Info title="Servicio" value={selectedLog.service_code}/><Info title="HTTP" value={String(selectedLog.http_status??"—")}/><Info title="Duración" value={latency(selectedLog.duration_ms)}/></div><h3>Request sanitizado</h3><pre style={{background:"#0f172a",color:"#e2e8f0",padding:14,borderRadius:10,overflowX:"auto",fontSize:12}}>{pretty(selectedLog.request_summary)}</pre><h3>Response sanitizado</h3><pre style={{background:"#0f172a",color:"#e2e8f0",padding:14,borderRadius:10,overflowX:"auto",fontSize:12}}>{pretty(selectedLog.response_summary)}</pre></div></div>:null}
+  </div>
+}
+
+function Metric({title,value,helper,small=false}:{title:string;value:string;helper:string;small?:boolean}){return <div style={{...card,padding:11,minHeight:78}}><small style={{display:"block",color:"#667085",fontWeight:700}}>{title}</small><strong style={{display:"block",fontSize:small?13:22,marginTop:5,lineHeight:1.15}}>{value}</strong><small style={{display:"block",color:"#98a2b3",marginTop:4}}>{helper}</small></div>}
+function Info({title,value}:{title:string;value:string}){return <div style={{padding:"9px 10px",border:"1px solid #e4e7ec",borderRadius:8,background:"#f8fafc",minWidth:0}}><small style={{display:"block",color:"#667085",fontSize:10,textTransform:"uppercase",fontWeight:800}}>{title}</small><strong title={value} style={{display:"block",fontSize:12,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{value}</strong></div>}
