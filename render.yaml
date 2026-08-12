@@ -52,6 +52,8 @@ services:
           property: connectionString
       - key: RUMBO_API_KEY
         generateValue: true
+      - key: RUMBO_INTEGRATION_MASTER_KEY
+        generateValue: true
       - key: RUMBO_DEMO_MODE
         value: "false"
       - key: RUMBO_ADMIN_EMAIL
