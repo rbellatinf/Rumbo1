@@ -1,6 +1,7 @@
 export type IntegrationMapping={rumboField:string;providerField:string;direction:"Rumbo → API"|"API → Rumbo"|"Bidireccional";type:string;required?:boolean;rule?:string};
 export type IntegrationService={code:string;name:string;method:string;endpoint:string;description:string;mappings:IntegrationMapping[]};
-export type IntegrationDefinition={code:string;name:string;category:string;environment:string;legacy?:boolean;credentialLabel:string;services:IntegrationService[]};
+export type IntegrationConfigField={key:string;label:string;kind:"public"|"secret";type?:"text"|"url"|"password";required?:boolean;placeholder?:string;helper?:string};
+export type IntegrationDefinition={code:string;name:string;category:string;environment:string;legacy?:boolean;credentialLabel:string;configurationFields?:IntegrationConfigField[];services:IntegrationService[]};
 
 export const integrationRegistry:IntegrationDefinition[]=[
   {code:"rumbo-api",name:"Rumbo API",category:"Core interno",environment:"Production",credentialLabel:"API Key interna",services:[
@@ -20,15 +21,23 @@ export const integrationRegistry:IntegrationDefinition[]=[
       {rumboField:"reference",providerField:"reference",direction:"API → Rumbo",type:"string",required:true},
     ]},
   ]},
-  {code:"airlabs",name:"AirLabs",category:"Aeropuertos",environment:"Production / fallback local",credentialLabel:"AIRLABS_API_KEY",services:[
-    {code:"airport-suggest",name:"Autocomplete aeropuerto",method:"GET",endpoint:"/suggest",description:"Sugerencias mundiales de ciudades y aeropuertos.",mappings:[
-      {rumboField:"search_text",providerField:"q",direction:"Rumbo → API",type:"string",required:true,rule:"mínimo 3 caracteres para consulta live"},
+  {code:"airlabs",name:"AirLabs",category:"Aeropuertos",environment:"Production / fallback local",credentialLabel:"API Key",configurationFields:[
+    {key:"base_url",label:"Base URL",kind:"public",type:"url",required:true,placeholder:"https://airlabs.co/api/v9"},
+    {key:"api_key",label:"API Key",kind:"secret",type:"password",required:true,helper:"Se cifra antes de guardarse y nunca vuelve al navegador completa."},
+  ],services:[
+    {code:"airport-suggest",name:"Autocomplete aeropuerto",method:"GET",endpoint:"/suggest + /airports",description:"Sugerencias mundiales de ciudades y aeropuertos, incluyendo resolución automática por país.",mappings:[
+      {rumboField:"search_text",providerField:"q / country_code",direction:"Rumbo → API",type:"string",required:true,rule:"nombre de ciudad/aeropuerto o país → ISO"},
       {rumboField:"iataCode",providerField:"iata_code / city_code",direction:"API → Rumbo",type:"string",required:true},
       {rumboField:"cityName",providerField:"city / name",direction:"API → Rumbo",type:"string"},
       {rumboField:"countryName",providerField:"country_code",direction:"API → Rumbo",type:"string",rule:"código ISO → nombre localizado"},
     ]},
   ]},
-  {code:"pricetravel",name:"PriceTravel",category:"Mayorista / paquetes",environment:"B2B",credentialLabel:"Usuario + contraseña B2B",services:[
+  {code:"pricetravel",name:"PriceTravel",category:"Mayorista / paquetes",environment:"B2B",credentialLabel:"Usuario + contraseña B2B",configurationFields:[
+    {key:"api_url",label:"API URL",kind:"public",type:"url",required:true},
+    {key:"packages_path",label:"Ruta paquetes",kind:"public",type:"text",required:true,placeholder:"/v1/packages"},
+    {key:"username",label:"Usuario",kind:"secret",type:"password",required:true},
+    {key:"password",label:"Contraseña",kind:"secret",type:"password",required:true},
+  ],services:[
     {code:"package-search",name:"Buscar paquetes",method:"GET",endpoint:"PRICETRAVEL_PACKAGES_PATH",description:"Consulta paquetes/tarifas B2B como fallback del catálogo propio.",mappings:[
       {rumboField:"origin_iata",providerField:"originAirportCode",direction:"Rumbo → API",type:"string",required:true},
       {rumboField:"destination_iata",providerField:"destinationAirportCode",direction:"Rumbo → API",type:"string",required:true},
@@ -40,7 +49,13 @@ export const integrationRegistry:IntegrationDefinition[]=[
       {rumboField:"image_url",providerField:"ImageUrl / HotelImageUri",direction:"API → Rumbo",type:"url"},
     ]},
   ]},
-  {code:"izipay",name:"Izipay",category:"Pagos",environment:"MiCuentaWeb / Krypton",credentialLabel:"REST credentials + HMAC",services:[
+  {code:"izipay",name:"Izipay",category:"Pagos",environment:"MiCuentaWeb / Krypton",credentialLabel:"REST credentials + HMAC",configurationFields:[
+    {key:"api_url",label:"API URL",kind:"public",type:"url",required:true,placeholder:"https://api.micuentaweb.pe"},
+    {key:"username",label:"Usuario REST",kind:"secret",type:"password",required:true},
+    {key:"password",label:"Contraseña REST",kind:"secret",type:"password",required:true},
+    {key:"public_key",label:"Public Key",kind:"secret",type:"password"},
+    {key:"hmac_key",label:"HMAC SHA-256 Key",kind:"secret",type:"password"},
+  ],services:[
     {code:"payment-session",name:"Crear sesión de pago",method:"POST",endpoint:"/api-payment/V4/Charge/CreatePayment",description:"Integración objetivo directa con Izipay. Mientras exista tráfico en Spree / Sesión de pago legacy, el checkout aún no está totalmente desacoplado.",mappings:[
       {rumboField:"booking.reference",providerField:"orderId",direction:"Rumbo → API",type:"string",required:true},
       {rumboField:"total_amount",providerField:"amount",direction:"Rumbo → API",type:"integer",required:true,rule:"monto en unidad mínima"},
@@ -53,7 +68,12 @@ export const integrationRegistry:IntegrationDefinition[]=[
       {rumboField:"payment_status",providerField:"orderStatus",direction:"API → Rumbo",type:"string",required:true,rule:"normalización a pending/paid/failed"},
     ]},
   ]},
-  {code:"cloudflare-r2",name:"Cloudflare R2",category:"Imágenes / objetos",environment:"Production",credentialLabel:"Cloudflare API Token",services:[
+  {code:"cloudflare-r2",name:"Cloudflare R2",category:"Imágenes / objetos",environment:"Production",credentialLabel:"Cloudflare API Token",configurationFields:[
+    {key:"account_id",label:"Account ID",kind:"public",type:"text",required:true},
+    {key:"bucket",label:"Bucket",kind:"public",type:"text",required:true,placeholder:"rumbo-images"},
+    {key:"public_base_url",label:"URL pública",kind:"public",type:"url"},
+    {key:"api_token",label:"API Token",kind:"secret",type:"password",required:true},
+  ],services:[
     {code:"image-upload",name:"Subir imagen de producto",method:"PUT",endpoint:"/r2/buckets/rumbo-images/objects/{key}",description:"Almacena imágenes del catálogo y devuelve referencia pública.",mappings:[
       {rumboField:"image.file",providerField:"body",direction:"Rumbo → API",type:"binary",required:true},
       {rumboField:"storage_key",providerField:"object key",direction:"Bidireccional",type:"string",required:true},
