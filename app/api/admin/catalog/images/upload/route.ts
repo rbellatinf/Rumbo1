@@ -161,14 +161,14 @@ export async function POST(request: NextRequest) {
     const month = String(now.getUTCMonth() + 1).padStart(2, "0");
     const objectKey = `catalog/${year}/${month}/${randomUUID()}.${extension}`;
     const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${bucket}/objects/${objectKey}`;
-    const body = new Uint8Array(await file.arrayBuffer());
+    const cloudflareForm = new FormData();
+    cloudflareForm.append("body", file, file.name || `rumbo-product.${extension}`);
     const upload = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${apiToken}`,
-        "Content-Type": file.type,
       },
-      body,
+      body: cloudflareForm,
       cache: "no-store",
     });
     const payload = (await upload.json().catch(() => ({}))) as CloudflareEnvelope<unknown>;
