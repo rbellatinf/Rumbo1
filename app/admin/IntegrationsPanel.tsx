@@ -5,12 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 type Mapping={rumboField:string;providerField:string;direction:string;type:string;required?:boolean;rule?:string};
 type Stats={integration_code:string;service_code:string;invocations:number;successes:number;errors:number;success_rate:number|null;avg_latency_ms:number|null;p95_latency_ms:number|null;last_invocation_at?:string|null;last_success_at?:string|null;last_error_at?:string|null};
 type Service={code:string;name:string;method:string;endpoint:string;description:string;mappings:Mapping[];stats:Stats|null};
-type Integration={code:string;name:string;category:string;environment:string;legacy?:boolean;credentialLabel:string;configured:boolean;status:string;base_host:string;credential_status:string;services:Service[]};
+type ConfigField={key:string;label:string;kind:"public"|"secret";type?:"text"|"url"|"password";required?:boolean;placeholder?:string;helper?:string};
+type Configuration={public_config:Record<string,string>;secret_mask:Record<string,string>;source:string;last_tested_at?:string|null;last_test_success?:boolean|null;last_test_message?:string|null;updated_at?:string|null;master_key_configured?:boolean};
+type Integration={code:string;name:string;category:string;environment:string;legacy?:boolean;credentialLabel:string;configurationFields?:ConfigField[];configuration?:Configuration|null;configured:boolean;status:string;base_host:string;credential_status:string;services:Service[]};
 type Log={id:string;integration_code:string;service_code:string;trace_id:string;source:string;success:boolean;http_status:number|null;duration_ms:number|null;error_code?:string|null;error_message?:string|null;request_summary?:Record<string,unknown>;response_summary?:Record<string,unknown>;created_at:string};
-type Payload={integrations:Integration[];logs:Log[];window_hours:number};
+type Payload={integrations:Integration[];logs:Log[];window_hours:number;master_key_configured?:boolean};
 
 const card:React.CSSProperties={background:"white",border:"1px solid #e4e7ec",borderRadius:12,padding:14};
-const field:React.CSSProperties={width:"100%",padding:"9px 10px",border:"1px solid #cfd5df",borderRadius:7,background:"white",fontSize:13};
+const field:React.CSSProperties={width:"100%",padding:"9px 10px",border:"1px solid #cfd5df",borderRadius:7,background:"white",fontSize:13,boxSizing:"border-box"};
 const label:React.CSSProperties={display:"grid",gap:5,fontSize:11,color:"#667085",fontWeight:800,textTransform:"uppercase",letterSpacing:.3};
 const th:React.CSSProperties={textAlign:"left",padding:"7px 9px",border:"1px solid #dfe4ea",background:"#eef2f5",color:"#536273",fontSize:10,fontWeight:800,textTransform:"uppercase"};
 const td:React.CSSProperties={padding:"7px 9px",border:"1px solid #e3e7eb",fontSize:12,verticalAlign:"top"};
@@ -23,7 +25,7 @@ function latency(value?:number|null){return value==null?"—":`${Math.round(Numb
 function pretty(value:unknown){try{return JSON.stringify(value??{},null,2)}catch{return "{}"}}
 
 export default function IntegrationsPanel(){
-  const [data,setData]=useState<Payload|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true),[hours,setHours]=useState(24),[integrationCode,setIntegrationCode]=useState("rumbo-api"),[serviceCode,setServiceCode]=useState("health"),[testing,setTesting]=useState(false),[testMessage,setTestMessage]=useState(""),[selectedLog,setSelectedLog]=useState<Log|null>(null);
+  const [data,setData]=useState<Payload|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true),[hours,setHours]=useState(24),[integrationCode,setIntegrationCode]=useState("rumbo-api"),[serviceCode,setServiceCode]=useState("health"),[testing,setTesting]=useState(false),[testMessage,setTestMessage]=useState(""),[selectedLog,setSelectedLog]=useState<Log|null>(null),[configValues,setConfigValues]=useState<Record<string,string>>({}),[savingConfig,setSavingConfig]=useState(false);
 
   async function load(nextHours=hours){
     setLoading(true);setError("");
@@ -37,9 +39,14 @@ export default function IntegrationsPanel(){
   const service=useMemo(()=>integration?.services.find(item=>item.code===serviceCode)||integration?.services[0]||null,[integration,serviceCode]);
   const logs=useMemo(()=>data?.logs.filter(item=>item.integration_code===integration?.code&&item.service_code===service?.code)||[],[data,integration,service]);
   const stat=service?.stats||null;
-  const overall=useMemo(()=>{
-    const items=data?.integrations||[];return {total:items.length,configured:items.filter(i=>i.configured).length,legacy:items.filter(i=>i.legacy).length,errors:(data?.logs||[]).filter(l=>!l.success).length};
-  },[data]);
+  const overall=useMemo(()=>{const items=data?.integrations||[];return {total:items.length,configured:items.filter(i=>i.configured).length,legacy:items.filter(i=>i.legacy).length,errors:(data?.logs||[]).filter(l=>!l.success).length}},[data]);
+
+  useEffect(()=>{
+    if(!integration)return;
+    const next:Record<string,string>={};
+    for(const item of integration.configurationFields||[])next[item.key]=item.kind==="public"?String(integration.configuration?.public_config?.[item.key]||""):"";
+    setConfigValues(next);
+  },[integration?.code,integration?.configuration?.updated_at]);
 
   async function testConnection(){
     if(!integration||!service)return;setTesting(true);setError("");setTestMessage("");
@@ -48,39 +55,36 @@ export default function IntegrationsPanel(){
     finally{setTesting(false)}
   }
 
+  async function saveConfiguration(){
+    if(!integration?.configurationFields?.length)return;
+    setSavingConfig(true);setError("");setTestMessage("");
+    try{
+      const public_config:Record<string,string>={},secrets:Record<string,string>={};
+      for(const item of integration.configurationFields){const value=String(configValues[item.key]||"").trim();if(item.kind==="public")public_config[item.key]=value;else if(value)secrets[item.key]=value}
+      const response=await fetch("/api/admin/integrations",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({integration_code:integration.code,public_config,secrets})});const payload=await response.json();if(!response.ok)throw new Error(payload.message||"No pudimos guardar la configuración.");setTestMessage(`Configuración de ${integration.name} guardada y cifrada.`);await load(hours)
+    }catch(e){setError(e instanceof Error?e.message:"No pudimos guardar la configuración.")}
+    finally{setSavingConfig(false)}
+  }
+
   if(loading&&!data)return <div style={{padding:30,color:"#667085"}}>Cargando integraciones…</div>;
 
   return <div style={{maxWidth:1500,margin:"0 auto",color:"#17233b"}}>
-    <div style={{display:"flex",justifyContent:"space-between",gap:18,alignItems:"end",marginBottom:14,flexWrap:"wrap"}}>
-      <div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,letterSpacing:1.1,textTransform:"uppercase"}}>Rumbo · Observabilidad</p><h1 style={{fontSize:32,margin:"4px 0"}}>APIs e integraciones</h1><p style={{margin:0,color:"#667085"}}>Servicios conectados, mapping, salud, latencia, errores y trazabilidad.</p></div>
-      <label style={{...label,width:180}}>Ventana estadísticas<select value={hours} onChange={e=>setHours(Number(e.target.value))} style={field}><option value={24}>Últimas 24 h</option><option value={168}>7 días</option><option value={720}>30 días</option></select></label>
-    </div>
+    <div style={{display:"flex",justifyContent:"space-between",gap:18,alignItems:"end",marginBottom:14,flexWrap:"wrap"}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,letterSpacing:1.1,textTransform:"uppercase"}}>Rumbo · Observabilidad</p><h1 style={{fontSize:32,margin:"4px 0"}}>APIs e integraciones</h1><p style={{margin:0,color:"#667085"}}>Configuración segura, mapping, salud, latencia, errores y trazabilidad.</p></div><label style={{...label,width:180}}>Ventana estadísticas<select value={hours} onChange={e=>setHours(Number(e.target.value))} style={field}><option value={24}>Últimas 24 h</option><option value={168}>7 días</option><option value={720}>30 días</option></select></label></div>
 
     {error?<div style={{padding:10,border:"1px solid #fecaca",background:"#fff5f5",color:"#991b1b",borderRadius:8,marginBottom:10}}>{error}</div>:null}
     {testMessage&&!error?<div style={{padding:10,border:"1px solid #bbf7d0",background:"#f0fdf4",color:"#166534",borderRadius:8,marginBottom:10}}>{testMessage}</div>:null}
 
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:12}}>
-      <Metric title="Integraciones" value={String(overall.total)} helper="registradas"/>
-      <Metric title="Configuradas" value={`${overall.configured}/${overall.total}`} helper="credenciales detectadas"/>
-      <Metric title="Legacy" value={String(overall.legacy)} helper="candidatas a retiro"/>
-      <Metric title="Errores ventana" value={String(overall.errors)} helper={`últimas ${hours===24?"24 h":hours===168?"7 días":"30 días"}`}/>
-    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:12}}><Metric title="Integraciones" value={String(overall.total)} helper="registradas"/><Metric title="Configuradas" value={`${overall.configured}/${overall.total}`} helper="credenciales detectadas"/><Metric title="Legacy" value={String(overall.legacy)} helper="candidatas a retiro"/><Metric title="Errores ventana" value={String(overall.errors)} helper={`últimas ${hours===24?"24 h":hours===168?"7 días":"30 días"}`}/></div>
 
-    <section style={{...card,marginBottom:12}}>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:8}}>
-        {(data?.integrations||[]).map(item=><button key={item.code} onClick={()=>{setIntegrationCode(item.code);setServiceCode(item.services?.[0]?.code||"");setTestMessage("")}} style={{textAlign:"left",border:item.code===integrationCode?"2px solid #102b50":"1px solid #e4e7ec",background:item.code===integrationCode?"#f3f7fb":"white",borderRadius:10,padding:10,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:9,height:9,borderRadius:99,background:item.legacy?"#f59e0b":item.configured?"#22c55e":"#cbd5e1"}}/><strong>{item.name}</strong></div><small style={{display:"block",color:"#667085",marginTop:4}}>{item.category}</small><small style={{display:"block",color:item.configured?"#16794b":"#98a2b3",marginTop:2}}>{item.legacy?"Legacy":item.configured?"Configurada":"Sin configurar"}</small></button>)}
-      </div>
-    </section>
+    <section style={{...card,marginBottom:12}}><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:8}}>{(data?.integrations||[]).map(item=><button key={item.code} onClick={()=>{setIntegrationCode(item.code);setServiceCode(item.services?.[0]?.code||"");setTestMessage("");setError("")}} style={{textAlign:"left",border:item.code===integrationCode?"2px solid #102b50":"1px solid #e4e7ec",background:item.code===integrationCode?"#f3f7fb":"white",borderRadius:10,padding:10,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:7}}><span style={{width:9,height:9,borderRadius:99,background:item.legacy?"#f59e0b":item.configured?"#22c55e":"#cbd5e1"}}/><strong>{item.name}</strong></div><small style={{display:"block",color:"#667085",marginTop:4}}>{item.category}</small><small style={{display:"block",color:item.configured?"#16794b":"#98a2b3",marginTop:2}}>{item.legacy?"Legacy":item.configured?"Configurada":"Sin configurar"}</small></button>)}</div></section>
 
-    <section style={{...card,marginBottom:12}}>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(260px,1fr) auto",gap:10,alignItems:"end"}}>
-        <label style={label}>1. Integración<select value={integrationCode} onChange={e=>{const next=data?.integrations.find(i=>i.code===e.target.value);setIntegrationCode(e.target.value);setServiceCode(next?.services?.[0]?.code||"");setTestMessage("")}} style={field}>{data?.integrations.map(item=><option key={item.code} value={item.code}>{item.name}{item.legacy?" · Legacy":""}</option>)}</select></label>
-        <label style={label}>2. Servicio<select value={service?.code||""} onChange={e=>{setServiceCode(e.target.value);setTestMessage("")}} style={field}>{integration?.services.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
-        <button disabled={testing||!service} onClick={()=>void testConnection()} style={{...primary,opacity:testing?.65:1,minWidth:150}}>{testing?"Probando…":"Probar conexión"}</button>
-      </div>
-      {integration&&service?<div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:8,marginTop:12}}><Info title="Estado" value={integration.legacy?"Legacy":integration.configured?"Configurada":"Pendiente"}/><Info title="Ambiente" value={integration.environment}/><Info title="Host" value={integration.base_host}/><Info title="Credencial" value={`${integration.credential_status} · ••••••••`}/><Info title="Método" value={service.method}/><Info title="Endpoint" value={service.endpoint}/><Info title="Categoría" value={integration.category}/><Info title="Servicio activo" value={integration.configured&&!integration.legacy?"Sí":"No / revisión"}/></div>:null}
-      {service?<p style={{margin:"12px 0 0",color:"#667085",fontSize:12}}>{service.description}</p>:null}
-    </section>
+    <section style={{...card,marginBottom:12}}><div style={{display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(260px,1fr) auto",gap:10,alignItems:"end"}}><label style={label}>1. Integración<select value={integrationCode} onChange={e=>{const next=data?.integrations.find(i=>i.code===e.target.value);setIntegrationCode(e.target.value);setServiceCode(next?.services?.[0]?.code||"");setTestMessage("");setError("")}} style={field}>{data?.integrations.map(item=><option key={item.code} value={item.code}>{item.name}{item.legacy?" · Legacy":""}</option>)}</select></label><label style={label}>2. Servicio<select value={service?.code||""} onChange={e=>{setServiceCode(e.target.value);setTestMessage("")}} style={field}>{integration?.services.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label><button disabled={testing||!service||!integration?.configured} onClick={()=>void testConnection()} style={{...primary,opacity:testing||!integration?.configured?.55:1,minWidth:150}}>{testing?"Probando…":"Probar conexión"}</button></div>{integration&&service?<div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:8,marginTop:12}}><Info title="Estado" value={integration.legacy?"Legacy":integration.configured?"Configurada":"Pendiente"}/><Info title="Ambiente" value={integration.environment}/><Info title="Host" value={integration.base_host}/><Info title="Credencial" value={integration.credential_status}/><Info title="Método" value={service.method}/><Info title="Endpoint" value={service.endpoint}/><Info title="Categoría" value={integration.category}/><Info title="Servicio activo" value={integration.configured&&!integration.legacy?"Sí":"No / revisión"}/></div>:null}{service?<p style={{margin:"12px 0 0",color:"#667085",fontSize:12}}>{service.description}</p>:null}</section>
+
+    {integration?.configurationFields?.length?<section style={{...card,marginBottom:12,borderColor:integration.configured?"#bbf7d0":"#f3d7a4"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12,flexWrap:"wrap"}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Configuración segura</p><h2 style={{margin:"3px 0"}}>{integration.name}</h2><p style={{margin:0,color:"#667085",fontSize:12}}>Los secretos se cifran en Rumbo API. Nunca se vuelven a mostrar completos.</p></div><div style={{textAlign:"right"}}><small style={{display:"block",color:"#667085"}}>Origen</small><strong style={{fontSize:12}}>{integration.configuration?.source==="admin"?"Administración Rumbo":integration.configuration?.source==="environment"?"Environment legacy":"Sin configurar"}</strong>{integration.configuration?.updated_at?<small style={{display:"block",color:"#98a2b3",marginTop:2}}>Actualizado {date(integration.configuration.updated_at)}</small>:null}</div></div>
+      {data?.master_key_configured===false?<div style={{marginTop:10,padding:9,borderRadius:8,background:"#fff7ed",color:"#9a3412",fontSize:12}}>La llave maestra todavía no está disponible en Rumbo API. Render debe aplicar el nuevo Blueprint antes de guardar secretos.</div>:null}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10,marginTop:12}}>{integration.configurationFields.map(item=><label key={item.key} style={{...label,textTransform:"none",fontSize:12}}>{item.label}{item.kind==="secret"&&integration.configuration?.secret_mask?.[item.key]?<small style={{fontWeight:500,color:"#667085"}}>Actual: {integration.configuration.secret_mask[item.key]}</small>:null}<input type={item.kind==="secret"?"password":item.type||"text"} value={configValues[item.key]||""} onChange={e=>setConfigValues(values=>({...values,[item.key]:e.target.value}))} placeholder={item.kind==="secret"&&integration.configuration?.secret_mask?.[item.key]?"Déjalo vacío para conservar la actual":item.placeholder||""} required={item.required&&item.kind==="public"} autoComplete="new-password" style={field}/>{item.helper?<small style={{fontWeight:500,color:"#98a2b3",lineHeight:1.35}}>{item.helper}</small>:null}</label>)}</div>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:12,flexWrap:"wrap"}}><button type="button" disabled={savingConfig||data?.master_key_configured===false} onClick={()=>void saveConfiguration()} style={{...primary,opacity:savingConfig||data?.master_key_configured===false?.55:1}}>{savingConfig?"Guardando…":"Guardar configuración"}</button>{integration.configuration?.last_tested_at?<small style={{color:integration.configuration.last_test_success?"#16794b":"#b42318"}}>Última prueba: {integration.configuration.last_test_success?"OK":"Error"} · {date(integration.configuration.last_tested_at)}</small>:null}</div>
+    </section>:null}
 
     {service?<><section style={{...card,marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"end",gap:10,marginBottom:10}}><div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:900,textTransform:"uppercase"}}>Mapping</p><h2 style={{margin:"3px 0"}}>Campos Rumbo ↔ proveedor</h2></div><span style={{fontSize:12,color:"#667085"}}>{service.mappings.length} reglas</span></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr><th style={th}>Campo Rumbo</th><th style={th}>Campo API</th><th style={th}>Dirección</th><th style={th}>Tipo</th><th style={th}>Obligatorio</th><th style={th}>Regla / transformación</th></tr></thead><tbody>{service.mappings.map((m,index)=><tr key={`${m.rumboField}-${index}`}><td style={td}><code>{m.rumboField}</code></td><td style={td}><code>{m.providerField}</code></td><td style={td}>{m.direction}</td><td style={td}>{m.type}</td><td style={td}>{m.required?"Sí":"No"}</td><td style={td}>{m.rule||"Directo"}</td></tr>)}</tbody></table></div></section>
 
