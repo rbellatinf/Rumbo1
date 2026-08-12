@@ -1,0 +1,46 @@
+name: Seed test catalog images in R2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/seed-test-catalog-r2.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    env:
+      CF_ACCOUNT_ID: b0c9535ffd40623838c8b025cc4bcda9
+      CF_BUCKET: rumbo-images
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload deterministic test catalog images
+        shell: bash
+        run: |
+          set -euo pipefail
+          upload() {
+            local source="$1"
+            local key="$2"
+            echo "Uploading ${source} -> ${key}"
+            response="$(curl --fail-with-body -sS -X PUT \
+              "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${CF_BUCKET}/objects/${key}" \
+              -H "Authorization: Bearer ${CF_TOKEN}" \
+              -F "body=@${source};type=image/jpeg")"
+            echo "$response" | python -c 'import json,sys; p=json.load(sys.stdin); assert p.get("success") is True, p; print("ok")'
+          }
+
+          upload public/images/rumbo-city.jpg  catalog/test/miami-city-break.jpg
+          upload public/images/rumbo-city.jpg  catalog/test/miami-shopping.jpg
+          upload public/images/rumbo-beach.jpg catalog/test/miami-beach.jpg
+          upload public/images/rumbo-hero.jpg  catalog/test/miami-premium.jpg
+          upload public/images/rumbo-city.jpg  catalog/test/panama-urbano.jpg
+          upload public/images/rumbo-hero.jpg  catalog/test/panama-canal.jpg
+          upload public/images/rumbo-beach.jpg catalog/test/punta-cana.jpg
+          upload public/images/rumbo-city.jpg  catalog/test/cartagena.jpg
