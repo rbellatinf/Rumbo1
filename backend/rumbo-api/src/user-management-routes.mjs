@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { installIntegrationObservabilityRoutes } from "./integration-observability-routes.mjs";
+import { installIntegrationConfigRoutes } from "./integration-config-routes.mjs";
 
 const clean=(v)=>String(v||"").trim();
 const sha256=(v)=>crypto.createHash("sha256").update(v).digest("hex");
@@ -9,6 +10,7 @@ function referralCode(first,last){const seed=`${first}-${last}`.toUpperCase().no
 
 export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
   installIntegrationObservabilityRoutes(app,{pool,requireAdmin,audit});
+  installIntegrationConfigRoutes(app,{pool,requireAdmin,audit});
 
   async function requireInternalAdmin(req,res,next){
     if(!req.adminSession?.account_id) return next();
@@ -63,7 +65,7 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     let query='';
     if(type==='partner') query=`SELECT p.account_id,p.first_name,p.last_name,p.document_type,p.document_number,p.date_of_birth,p.phone,p.referral_code,p.public_slug,p.commission_rate,p.network_commission_rate,p.created_at,a.email,a.status,a.last_login_at FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.account_id=$1 LIMIT 1`;
     if(type==='internal') query=`SELECT i.account_id,i.first_name,i.last_name,i.internal_role,i.job_title,i.phone,i.document_type,i.document_number,i.date_of_birth,i.created_at,a.email,a.status,a.last_login_at FROM rumbo_internal_members i JOIN rumbo_accounts a ON a.id=i.account_id WHERE i.account_id=$1 LIMIT 1`;
-    if(type==='retailer') query=`SELECT m.account_id,m.retailer_id,m.first_name,m.last_name,m.member_role,m.phone,m.document_type,m.document_number,m.date_of_birth,m.created_at,a.email,a.status,a.last_login_at,r.trade_name,r.legal_name,r.tax_id FROM rumbo_retailer_members m JOIN rumbo_accounts a ON a.id=m.account_id JOIN rumbo_retailers r ON r.id=m.retailer_id WHERE m.account_id=$1 LIMIT 1`;
+    if(type==='retailer') query=`SELECT m.account_id,m.retailer_id,m.first_name,m.last_name,m.member_role,m.phone,m.document_type,m.document_number,m.date_of_birth,m.created_at,a.email,a.status,a.last_login_at FROM rumbo_retailer_members m JOIN rumbo_accounts a ON a.id=m.account_id JOIN rumbo_retailers r ON r.id=m.retailer_id WHERE m.account_id=$1 LIMIT 1`;
     const {rows}=await pool.query(query,[id]); if(!rows[0])return res.status(404).json({error:{message:'Persona no encontrada.'}});res.json({person:{...rows[0],person_type:type}});
   });
 
