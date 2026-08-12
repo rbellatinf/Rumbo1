@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS rumbo_catalog_source_links (
 );
 CREATE INDEX IF NOT EXISTS rumbo_catalog_source_links_product_idx ON rumbo_catalog_source_links(product_id);
 
+CREATE TABLE IF NOT EXISTS rumbo_catalog_departure_source_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system varchar(30) NOT NULL,
+  source_id varchar(160) NOT NULL,
+  product_id uuid NOT NULL REFERENCES rumbo_catalog_products(id) ON DELETE CASCADE,
+  departure_id uuid NOT NULL REFERENCES rumbo_catalog_departures(id) ON DELETE CASCADE,
+  raw_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  imported_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(source_system,source_id),
+  UNIQUE(departure_id)
+);
+CREATE INDEX IF NOT EXISTS rumbo_catalog_departure_source_product_idx ON rumbo_catalog_departure_source_links(product_id);
+
 CREATE TABLE IF NOT EXISTS rumbo_catalog_migration_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_system varchar(30) NOT NULL,
