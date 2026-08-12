@@ -106,7 +106,7 @@ function countryIndex(){
 function resolveCountry(query){
   const q=normalize(query);if(q.length<4)return null;
   let best=null;
-  for(const item of countryIndex())for(const name of item.names){const n=normalize(name);if(!n)continue;if(n===q)return{code:item.code,name};const dist=levenshtein(q,n);const threshold=q.length>=7?2:1;if(dist<=threshold&&(!best||dist<best.dist))best={code:item.code,name,dist}}
+  for(const item of countryIndex())for(const name of item.names){const n=normalize(name);if(!n)continue;if(n===q)return{code:item.code,name};const dist=levenshtein(q,n);const threshold=q.length>=5?2:1;if(dist<=threshold&&(!best||dist<best.dist))best={code:item.code,name,dist}}
   return best?{code:best.code,name:best.name}:null;
 }
 function countryName(code){try{return new Intl.DisplayNames(["es"],{type:"region"}).of(code)||code}catch{return code}}
