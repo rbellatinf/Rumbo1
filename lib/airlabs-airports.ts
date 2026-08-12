@@ -1,4 +1,4 @@
-import { recordIntegrationCall } from "./integration-telemetry";
+import { recordIntegrationCall } from "./integration-telemetry.ts";
 
 export type AirportOption = {
   id: string;
