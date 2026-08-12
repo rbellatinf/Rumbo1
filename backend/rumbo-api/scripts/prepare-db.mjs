@@ -27,6 +27,8 @@ const migrations = [
   "099_rumbo_catalog_image_storage.sql",
   "100_rumbo_integration_observability.sql",
   "101_rumbo_integration_configs.sql",
+  "101_rumbo_test_catalog_seed.sql",
+  "102_rumbo_world_test_catalog_seed.sql",
 ];
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
