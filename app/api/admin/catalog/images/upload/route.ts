@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
+import { recordIntegrationCall } from "@/lib/integration-telemetry";
 import {
   accessConfiguration,
   demoMode,
@@ -120,8 +121,10 @@ export async function POST(request: NextRequest) {
     return noStoreJson({ message: "Se requiere una sesión administrativa válida." }, 401);
   }
 
+  const started=Date.now();
   const apiToken = process.env.CLOUDFLARE_API_TOKEN?.trim() || "";
   if (!apiToken) {
+    recordIntegrationCall({integrationCode:"cloudflare-r2",serviceCode:"image-upload",source:"admin_catalog",success:false,httpStatus:null,durationMs:Date.now()-started,errorCode:"CLOUDFLARE_NOT_CONFIGURED",errorMessage:"CLOUDFLARE_API_TOKEN no está configurado."});
     return noStoreJson(
       {
         message:
@@ -173,15 +176,19 @@ export async function POST(request: NextRequest) {
     });
     const payload = (await upload.json().catch(() => ({}))) as CloudflareEnvelope<unknown>;
     if (!upload.ok || payload.success === false) {
+      const message=cloudflareMessage(payload, `Cloudflare no pudo guardar la imagen (${upload.status}).`);
+      recordIntegrationCall({integrationCode:"cloudflare-r2",serviceCode:"image-upload",source:"admin_catalog",success:false,httpStatus:upload.status,durationMs:Date.now()-started,errorCode:"R2_UPLOAD_FAILED",errorMessage:message,requestSummary:{bucket,content_type:file.type,size:file.size}});
       return noStoreJson(
-        { message: cloudflareMessage(payload, `Cloudflare no pudo guardar la imagen (${upload.status}).`) },
+        { message },
         upload.status >= 400 && upload.status < 600 ? upload.status : 502,
       );
     }
 
+    const url=publicObjectUrl(publicBaseUrl, objectKey);
+    recordIntegrationCall({integrationCode:"cloudflare-r2",serviceCode:"image-upload",source:"admin_catalog",success:true,httpStatus:upload.status,durationMs:Date.now()-started,requestSummary:{bucket,content_type:file.type,size:file.size},responseSummary:{storage_key:objectKey,url_host:new URL(url).host}});
     return noStoreJson(
       {
-        url: publicObjectUrl(publicBaseUrl, objectKey),
+        url,
         storage_provider: "cloudflare-r2",
         storage_key: objectKey,
         bucket,
@@ -191,13 +198,10 @@ export async function POST(request: NextRequest) {
       201,
     );
   } catch (error) {
+    const message=error instanceof Error?error.message:"No pudimos subir la imagen a Cloudflare R2.";
+    recordIntegrationCall({integrationCode:"cloudflare-r2",serviceCode:"image-upload",source:"admin_catalog",success:false,httpStatus:null,durationMs:Date.now()-started,errorCode:"R2_UPLOAD_EXCEPTION",errorMessage:message,requestSummary:{bucket,content_type:file.type,size:file.size}});
     return noStoreJson(
-      {
-        message:
-          error instanceof Error
-            ? error.message
-            : "No pudimos subir la imagen a Cloudflare R2.",
-      },
+      { message },
       502,
     );
   }
