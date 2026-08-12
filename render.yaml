@@ -28,8 +28,6 @@ services:
         value: rumbo-images
       - key: CLOUDFLARE_R2_PUBLIC_BASE_URL
         value: https://pub-4a41d3634afa4e46b3be096a1d931aa7.r2.dev
-      - key: CLOUDFLARE_API_TOKEN
-        sync: false
       - key: SPREE_API_URL
         fromService:
           name: rumbo1-spree
@@ -66,6 +64,8 @@ services:
         sync: false
       - key: RUMBO_PUBLIC_URL
         value: https://rumbo-storefront.onrender.com
+      - key: CLOUDFLARE_ACCOUNT_ID
+        value: b0c9535ffd40623838c8b025cc4bcda9
       - key: CLOUDFLARE_R2_BUCKET
         value: rumbo-images
       - key: CLOUDFLARE_R2_PUBLIC_BASE_URL
