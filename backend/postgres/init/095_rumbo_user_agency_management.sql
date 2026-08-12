@@ -34,8 +34,19 @@ FROM rumbo_accounts a
 WHERE a.role='wholesaler_admin'
 ON CONFLICT (account_id) DO NOTHING;
 
-CREATE OR REPLACE VIEW rumbo_internal_user_summary AS
-SELECT a.id AS account_id,i.first_name,i.last_name,i.internal_role,i.phone,i.job_title,
-       a.email,a.status,a.last_login_at,a.must_change_password,a.created_at
-FROM rumbo_internal_members i
-JOIN rumbo_accounts a ON a.id=i.account_id;
+-- 096 amplía esta vista con documento y fecha de nacimiento. Como db:prepare
+-- vuelve a ejecutar 095 en cada arranque, no debemos intentar reemplazar una
+-- definición posterior con menos columnas. La vista base se crea solo si falta.
+DO $$
+BEGIN
+  IF to_regclass('public.rumbo_internal_user_summary') IS NULL THEN
+    EXECUTE $view$
+      CREATE VIEW rumbo_internal_user_summary AS
+      SELECT a.id AS account_id,i.first_name,i.last_name,i.internal_role,i.phone,i.job_title,
+             a.email,a.status,a.last_login_at,a.must_change_password,a.created_at
+      FROM rumbo_internal_members i
+      JOIN rumbo_accounts a ON a.id=i.account_id
+    $view$;
+  END IF;
+END;
+$$;
