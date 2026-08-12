@@ -258,11 +258,11 @@ async function main() {
           const sourceDepartureId = `${sourceId}:${variantId}:${currency}`;
           const departureLink = await client.query(`SELECT departure_id FROM rumbo_catalog_departure_source_links WHERE source_system='spree' AND source_id=$1 FOR UPDATE`,[sourceDepartureId]);
           let departureId = departureLink.rows[0]?.departure_id;
-          const departureValues = [productId,departureDate,returnDate,currency,amount,cost,capacity,capacity,sourceDepartureId];
+          const departureValues = [productId,departureDate,returnDate,currency,amount,cost,capacity,capacity];
           if (departureId) {
-            await client.query(`UPDATE rumbo_catalog_departures SET product_id=$1,departure_date=$2,return_date=$3,currency=$4,price_amount=$5,cost_amount=$6,capacity=COALESCE($7,capacity),available_capacity=CASE WHEN $8::int IS NULL THEN available_capacity ELSE LEAST(COALESCE(available_capacity,$8),$8) END,status='active' WHERE id=$10`, [...departureValues, departureId]);
+            await client.query(`UPDATE rumbo_catalog_departures SET product_id=$1,departure_date=$2,return_date=$3,currency=$4,price_amount=$5,cost_amount=$6,capacity=COALESCE($7,capacity),available_capacity=CASE WHEN $8::int IS NULL THEN available_capacity ELSE LEAST(COALESCE(available_capacity,$8),$8) END,status='active' WHERE id=$9`, [...departureValues, departureId]);
           } else {
-            departureId = (await client.query(`INSERT INTO rumbo_catalog_departures(product_id,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active') RETURNING id`,departureValues.slice(0,8))).rows[0].id;
+            departureId = (await client.query(`INSERT INTO rumbo_catalog_departures(product_id,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active') RETURNING id`,departureValues)).rows[0].id;
           }
           await client.query(`INSERT INTO rumbo_catalog_departure_source_links(source_system,source_id,product_id,departure_id,raw_snapshot,imported_at) VALUES('spree',$1,$2,$3,$4::jsonb,now()) ON CONFLICT(source_system,source_id) DO UPDATE SET product_id=EXCLUDED.product_id,departure_id=EXCLUDED.departure_id,raw_snapshot=EXCLUDED.raw_snapshot,imported_at=now()`,[sourceDepartureId,productId,departureId,JSON.stringify({variant:master,price,departure_date:departureDate,return_date:returnDate,capacity})]);
           departuresMigrated += 1; withPrice += 1;
