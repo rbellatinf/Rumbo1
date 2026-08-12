@@ -54,7 +54,7 @@ function baseUrlFromStored(code:string,config?:StoredConfig){
   if(code==="airlabs")return publicConfig.base_url||"https://airlabs.co/api/v9";
   if(code==="pricetravel")return publicConfig.api_url||"";
   if(code==="izipay")return publicConfig.api_url||"https://api.micuentaweb.pe";
-  if(code==="cloudflare-r2")return publicConfig.public_base_url||"https://api.cloudflare.com/client/v4";
+  if(code==="cloudflare-r2")return publicConfig.account_id?`https://${publicConfig.account_id}.r2.cloudflarestorage.com`:"";
   return "";
 }
 
