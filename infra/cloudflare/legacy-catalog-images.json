@@ -1,0 +1,23 @@
+{
+  "public_base_url": "https://pub-4a41d3634afa4e46b3be096a1d931aa7.r2.dev",
+  "bucket": "rumbo-images",
+  "products": [
+    {
+      "source_system": "spree",
+      "source_id": "1",
+      "match": "panama",
+      "filename": "Panama1.jpg",
+      "object_key": "gvvfzevs4tccnt4btxwy680q9d7l",
+      "primary": true
+    },
+    {
+      "source_system": "spree",
+      "source_id": "2",
+      "match": "miami",
+      "filename": "Miami1.jpg",
+      "object_key": "3catei9qospldeo73zau9czjkqsg",
+      "primary": true,
+      "duplicate_legacy_object_key": "b4ot2lbnmmzwkgyhyx037xnls14o"
+    }
+  ]
+}
