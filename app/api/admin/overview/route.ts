@@ -39,6 +39,8 @@ function developmentAdminPayload() {
   };
 }
 
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+
 export async function GET(request: NextRequest) {
   const provider = accessConfiguration();
   if (!provider || provider.kind !== "rumbo") {
@@ -48,24 +50,37 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token && !demoMode()) return noStoreJson({ message: "No hay una sesión administrativa activa." }, 401);
 
-  try {
-    const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
-      headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
-      cache: "no-store",
-    });
-    const payload = await parseJson(upstream);
-    if (!upstream.ok) {
-      // Development must remain visually testable even while a live admin
-      // endpoint is being completed. Never send the user back to login in demo mode.
-      if (demoMode()) return noStoreJson(developmentAdminPayload());
-      const response = noStoreJson({ message: backendMessage(payload, "No pudimos cargar el backoffice.") }, upstream.status || 502);
-      if (upstream.status === 401) response.cookies.delete(RUMBO_SESSION_COOKIE);
-      return response;
+  let lastError:unknown=null;
+  for(let attempt=0;attempt<3;attempt++){
+    if(attempt>0)await sleep(attempt===1?650:1400);
+    try {
+      const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
+        headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
+        cache: "no-store",
+      });
+      const payload = await parseJson(upstream);
+      if (upstream.ok) return noStoreJson(payload);
+
+      if (upstream.status === 401 || upstream.status === 403) {
+        const response = noStoreJson({ message: backendMessage(payload, "La sesión administrativa ya no es válida.") }, upstream.status);
+        if (upstream.status === 401) response.cookies.delete(RUMBO_SESSION_COOKIE);
+        return response;
+      }
+
+      if (![502,503,504].includes(upstream.status) || attempt===2) {
+        if (demoMode()) return noStoreJson(developmentAdminPayload());
+        return noStoreJson({ message: backendMessage(payload, "No pudimos cargar el backoffice.") }, upstream.status || 502);
+      }
+      lastError=new Error(backendMessage(payload, `Rumbo API respondió ${upstream.status}.`));
+    } catch (error) {
+      lastError=error;
+      if(attempt===2){
+        console.error("admin overview upstream failed", error);
+        if (demoMode()) return noStoreJson(developmentAdminPayload());
+      }
     }
-    return noStoreJson(payload);
-  } catch (error) {
-    console.error("admin overview upstream failed", error);
-    if (demoMode()) return noStoreJson(developmentAdminPayload());
-    return noStoreJson({ message: "Rumbo API no respondió al cargar el backoffice." }, 502);
   }
+
+  console.error("admin overview exhausted retries", lastError);
+  return noStoreJson({ message: "Rumbo API no respondió al cargar el backoffice. Reintenta en unos segundos." }, 502);
 }
