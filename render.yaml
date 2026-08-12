@@ -22,6 +22,12 @@ services:
           envVarKey: RUMBO_API_KEY
       - key: RUMBO_DEMO_MODE
         value: "false"
+      - key: CLOUDFLARE_ACCOUNT_ID
+        value: b0c9535ffd40623838c8b025cc4bcda9
+      - key: CLOUDFLARE_R2_BUCKET
+        value: rumbo-images
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
       - key: SPREE_API_URL
         fromService:
           name: rumbo1-spree
