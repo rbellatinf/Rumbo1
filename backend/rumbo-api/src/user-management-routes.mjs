@@ -29,6 +29,28 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     try{await client.query('BEGIN');const {rows}=await client.query(`INSERT INTO rumbo_accounts(email,password_hash,role,status,must_change_password) VALUES($1,$2,$3,'active',true) RETURNING id,email,status`,[email,hash,accountRole]);await client.query(`INSERT INTO rumbo_retailer_members(retailer_id,account_id,member_role,first_name,last_name,phone,document_type,document_number,date_of_birth,created_by_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::date,$10)`,[retailerId,rows[0].id,role,first,last,phone||null,documentType||'DNI',documentNumber||null,dateOfBirth||'',createdBy]);await client.query('COMMIT');await audit(actor,'retailer.person_created','retailer_user',rows[0].id,{retailer_id:retailerId,email,role});return res.status(201).json({person:{...rows[0],first_name:first,last_name:last,member_role:role,document_type:documentType||'DNI',document_number:documentNumber||null,date_of_birth:dateOfBirth||null,phone:phone||null},credentials:{username:email,temporary_password:password,must_change_password:true}})}catch(e){await client.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return res.status(409).json({error:{message:'Ya existe una persona con ese correo o documento.'}});console.error(e);return res.status(500).json({error:{message:'No pudimos crear la persona.'}})}finally{client.release()}
   }
 
+  // Se instala antes que las rutas legacy del gateway para que las imágenes
+  // nativas conserven también la identidad del objeto físico en Cloudflare R2.
+  app.post('/api/admin/catalog/:id/images',requireAdmin,async(req,res)=>{
+    const url=clean(req.body.url),storageProvider=clean(req.body.storage_provider)||null,storageKey=clean(req.body.storage_key)||null,bucketName=clean(req.body.bucket_name)||null;
+    if(!url)return res.status(422).json({error:{message:'URL de imagen obligatoria.'}});
+    if(storageProvider&&storageProvider!=='cloudflare-r2'&&storageProvider!=='external'&&storageProvider!=='legacy-spree')return res.status(422).json({error:{message:'Proveedor de almacenamiento inválido.'}});
+    const primary=Boolean(req.body.is_primary),metadata=req.body.metadata&&typeof req.body.metadata==='object'&&!Array.isArray(req.body.metadata)?req.body.metadata:{},client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      if(primary)await client.query(`UPDATE rumbo_catalog_images SET is_primary=false WHERE product_id=$1`,[req.params.id]);
+      const {rows}=await client.query(`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,sort_order,is_primary,storage_provider,storage_key,bucket_name,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING *`,[req.params.id,url,clean(req.body.alt_text)||null,Number(req.body.sort_order)||0,primary,storageProvider,storageKey,bucketName,JSON.stringify(metadata)]);
+      await client.query('COMMIT');
+      await audit(req.adminSession.email,'catalog.image_created','catalog_product',req.params.id,{image_id:rows[0].id,storage_provider:storageProvider,storage_key:storageKey,bucket_name:bucketName});
+      return res.status(201).json({image:rows[0]});
+    }catch(e){
+      await client.query('ROLLBACK').catch(()=>{});
+      if(e.code==='23503')return res.status(404).json({error:{message:'Producto no encontrado.'}});
+      if(e.code==='23505')return res.status(409).json({error:{message:'Ese objeto de imagen ya está asociado al catálogo.'}});
+      console.error(e);return res.status(500).json({error:{message:'No pudimos agregar la imagen.'}});
+    }finally{client.release()}
+  });
+
   app.get('/api/admin/internal-users',requireAdmin,async(_req,res)=>{
     const {rows}=await pool.query(`SELECT * FROM rumbo_internal_user_summary ORDER BY CASE WHEN internal_role='admin' THEN 0 ELSE 1 END,first_name,last_name`);
     res.json({users:rows});
