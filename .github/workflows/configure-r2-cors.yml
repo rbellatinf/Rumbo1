@@ -43,54 +43,42 @@ jobs:
             exit 1
           fi
 
-      - name: Discover public R2 domain and legacy product objects
+      - name: Ensure catalog bucket has public r2.dev domain
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/domains/managed" \
+          endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/domains/managed"
+          curl -fsS "$endpoint" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H "Accept: application/json" > /tmp/r2-domain.json
 
-          curl -fsS \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${R2_BUCKET}/objects?per_page=1000" \
+          enabled="$(python - <<'PY'
+          import json
+          with open('/tmp/r2-domain.json', encoding='utf-8') as fh:
+              payload = json.load(fh)
+          print('true' if (payload.get('result') or {}).get('enabled') else 'false')
+          PY
+          )"
+
+          if [[ "$enabled" != "true" ]]; then
+            curl -fsS -X PUT "$endpoint" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"enabled":true}' > /tmp/r2-domain-enabled.json
+          fi
+
+          curl -fsS "$endpoint" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Accept: application/json" > /tmp/r2-objects.json
+            -H "Accept: application/json" > /tmp/r2-domain-final.json
 
           python - <<'PY'
           import json
-          import re
-
-          with open('/tmp/r2-domain.json', encoding='utf-8') as fh:
-              domain_payload = json.load(fh)
-          result = domain_payload.get('result') or {}
-          print(f"R2_PUBLIC_DOMAIN={result.get('domain') or 'NONE'}")
-          print(f"R2_PUBLIC_ENABLED={result.get('enabled')}")
-
-          with open('/tmp/r2-objects.json', encoding='utf-8') as fh:
-              objects_payload = json.load(fh)
-          raw = objects_payload.get('result') or []
-          if isinstance(raw, dict):
-              objects = raw.get('objects') or raw.get('items') or []
-          else:
-              objects = raw
-          print(f"R2_OBJECT_COUNT_PAGE={len(objects)}")
-          known_panama_key = 'gvvfzevs4tccnt4btxwy680q9d7l'
-          matches = []
-          for item in objects:
-              text = json.dumps(item, ensure_ascii=False)
-              key = str(item.get('key') or item.get('name') or '')
-              if key == known_panama_key or re.search(r'panam|miami', text, re.I):
-                  matches.append(item)
-          if not matches:
-              print('R2_LEGACY_MATCHES=NONE')
-          for item in matches:
-              print('R2_LEGACY_OBJECT=' + json.dumps({
-                  'key': item.get('key') or item.get('name'),
-                  'size': item.get('size'),
-                  'http_metadata': item.get('http_metadata'),
-                  'custom_metadata': item.get('custom_metadata'),
-              }, ensure_ascii=False))
+          with open('/tmp/r2-domain-final.json', encoding='utf-8') as fh:
+              payload = json.load(fh)
+          result = payload.get('result') or {}
+          if not result.get('enabled'):
+              raise SystemExit('El dominio público r2.dev sigue deshabilitado.')
+          print(f"R2 public catalog domain enabled: https://{result.get('domain')}")
           PY
 
       - name: Apply CORS policy to rumbo-images
