@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import AdminLayoutClient from "./AdminLayoutClient";
+import AdminRuntime from "./AdminRuntime";
 
 export default function AdminLayout({children}:{children:ReactNode}){
   return <div className="rumbo-admin-root">
@@ -17,6 +17,6 @@ export default function AdminLayout({children}:{children:ReactNode}){
         visibility: visible !important;
       }
     `}</style>
-    <AdminLayoutClient>{children}</AdminLayoutClient>
+    <AdminRuntime>{children}</AdminRuntime>
   </div>;
 }
