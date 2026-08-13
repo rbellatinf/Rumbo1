@@ -1,32 +1,29 @@
 # Rumbo — MVP 1
 
-Storefront y base operativa para venta de paquetes turísticos, asociados,
-licencias, enlaces de referido y comisión directa.
+Storefront y base operativa para venta de paquetes turísticos, Partners, agencias minoristas, referidos y comisiones.
 
-## Estado actual
+## Arquitectura actual
 
-- buscador y catálogo adaptable a celular y escritorio;
-- detalle y reserva automática con bloqueo temporal de precio y cupos;
-- consulta de estado mediante referencia y correo del viajero;
-- handoff firmado hacia una pasarela alojada y webhook de pago idempotente;
-- checkout Izipay con `formToken`, formulario Krypton V4, retorno e IPN firmados;
-- portal demostrativo del asociado;
-- backoffice demostrativo;
-- adaptador para el catálogo de Spree Store API v3;
-- autocompletado mundial de aeropuertos preparado para AirLabs Name Suggestion;
-- buscador de paquetes preparado para el contrato B2B de PriceTravel;
-- PostgreSQL con inventario, bloqueos de cupos, pagos, eventos de pasarela,
-  reservas, historial de estados, asociados, licencias, atribuciones,
-  comisiones y auditoría;
-- entorno reproducible con Spree Commerce 5.4 y PostgreSQL 18.
+Rumbo usa una única fuente operativa: **Rumbo API + PostgreSQL**.
 
-Mientras el backend no esté configurado, las tarifas aparecen claramente como
-demostrativas y no se generan cobros ni tickets. El checkout Izipay requiere las
-claves API REST, clave pública y clave HMAC de una tienda Izipay propia de Rumbo.
+- storefront responsive para búsqueda, catálogo y reservas;
+- catálogo propio en `rumbo_catalog_products` y `rumbo_catalog_departures`;
+- reserva automática con precio y cupos validados en servidor;
+- consulta de reserva mediante referencia y correo;
+- pagos y eventos de pago persistidos en PostgreSQL;
+- checkout Izipay iniciado y validado desde Rumbo API;
+- portal Partner y portal de agencias minoristas;
+- backoffice mayorista propio;
+- AirLabs para autocompletado mundial de aeropuertos;
+- PriceTravel B2B como fuente externa de paquetes cuando no existe inventario propio compatible;
+- Cloudflare R2 para imágenes del catálogo;
+- comisiones, atribuciones y auditoría en PostgreSQL.
 
-Los conectores externos nunca envían secretos al navegador. Sin las
-credenciales de sandbox, AirLabs usa una lista local de respaldo y
-PriceTravel devuelve los paquetes demostrativos de Rumbo.
+## Regla de integraciones
+
+Las integraciones externas se configuran en Rumbo API / Administración. El navegador no recibe secretos.
+
+**No existen fallbacks locales o demostrativos para ocultar errores de integración.** Si AirLabs, PriceTravel, Izipay o Rumbo API fallan o no están configurados, el sistema devuelve un error visible para facilitar el diagnóstico.
 
 ## Desarrollo del storefront
 
@@ -37,37 +34,33 @@ npm ci
 npm run dev
 ```
 
-Validación:
+Validación completa:
 
 ```bash
 npm run lint
-npm run build
+npm test
 ```
 
-## Backend comercial
+## Backend nativo
 
-Crear `.env` desde `.env.example`, reemplazar todos los secretos y ejecutar en
-un servidor con Docker:
+Crear `.env` desde `.env.example`, reemplazar los secretos y ejecutar:
 
 ```bash
 docker compose up -d
 ```
 
-El backoffice de Spree queda disponible en el puerto configurado. Después de
-crear una clave publicable, configurar `SPREE_API_URL` y
-`SPREE_PUBLISHABLE_API_KEY` en el storefront.
+Servicios locales principales:
 
-La definición completa del alcance y la arquitectura está en
-[`docs/MVP1_ARCHITECTURE.md`](docs/MVP1_ARCHITECTURE.md).
+- PostgreSQL 18;
+- Rumbo API (Node.js);
+- storefront Node/Next/Vinext.
 
-Los pasos y variables de las integraciones están en
-[`docs/TRAVEL_API_INTEGRATIONS.md`](docs/TRAVEL_API_INTEGRATIONS.md).
+En Render, `render.yaml` define únicamente `rumbo-storefront`, `rumbo-api` y `rumbo1-postgres`.
 
-El contrato exacto de campos entre Spree y el storefront está en
-[`docs/SPREE_CATALOG_CONTRACT.md`](docs/SPREE_CATALOG_CONTRACT.md).
+## Documentación
 
-El handoff, la firma y el webhook normalizado de pagos están en
-[`docs/PAYMENT_GATEWAY_CONTRACT.md`](docs/PAYMENT_GATEWAY_CONTRACT.md).
+La arquitectura está en [`docs/MVP1_ARCHITECTURE.md`](docs/MVP1_ARCHITECTURE.md).
 
-La configuración específica de Izipay, sus variables y pruebas está en
-[`docs/IZIPAY_INTEGRATION.md`](docs/IZIPAY_INTEGRATION.md).
+Las integraciones de viajes están en [`docs/TRAVEL_API_INTEGRATIONS.md`](docs/TRAVEL_API_INTEGRATIONS.md).
+
+El flujo de pagos está en [`docs/PAYMENT_GATEWAY_CONTRACT.md`](docs/PAYMENT_GATEWAY_CONTRACT.md) y [`docs/IZIPAY_INTEGRATION.md`](docs/IZIPAY_INTEGRATION.md).
