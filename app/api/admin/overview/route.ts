@@ -39,7 +39,30 @@ function developmentAdminPayload() {
   };
 }
 
-const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const TRANSIENT = new Set([502, 503, 504]);
+
+async function waitForApi(apiUrl: string) {
+  // Render Free can need close to a minute to wake. Keep one browser request alive
+  // while polling /health instead of returning the platform's temporary 502 page.
+  const deadline = Date.now() + 70_000;
+  let delay = 0;
+  while (Date.now() < deadline) {
+    if (delay) await sleep(delay);
+    try {
+      const health = await fetch(`${apiUrl}/health`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (health.ok) return true;
+      if (!TRANSIENT.has(health.status)) return false;
+    } catch {
+      // Network errors are expected while the free instance is being recreated.
+    }
+    delay = delay ? Math.min(Math.round(delay * 1.55), 8_000) : 1_200;
+  }
+  return false;
+}
 
 export async function GET(request: NextRequest) {
   const provider = accessConfiguration();
@@ -50,13 +73,20 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token && !demoMode()) return noStoreJson({ message: "No hay una sesión administrativa activa." }, 401);
 
-  let lastError:unknown=null;
-  for(let attempt=0;attempt<3;attempt++){
-    if(attempt>0)await sleep(attempt===1?650:1400);
+  const ready = await waitForApi(provider.apiUrl);
+  if (!ready) {
+    if (demoMode()) return noStoreJson(developmentAdminPayload());
+    return noStoreJson({ message: "Rumbo API está demorando más de lo esperado en iniciar. Reintenta en unos segundos." }, 503);
+  }
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleep(attempt === 1 ? 800 : 1_600);
     try {
       const upstream = await fetch(`${provider.apiUrl}/api/admin/overview`, {
         headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }),
         cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
       });
       const payload = await parseJson(upstream);
       if (upstream.ok) return noStoreJson(payload);
@@ -67,14 +97,14 @@ export async function GET(request: NextRequest) {
         return response;
       }
 
-      if (![502,503,504].includes(upstream.status) || attempt===2) {
+      if (!TRANSIENT.has(upstream.status) || attempt === 2) {
         if (demoMode()) return noStoreJson(developmentAdminPayload());
         return noStoreJson({ message: backendMessage(payload, "No pudimos cargar el backoffice.") }, upstream.status || 502);
       }
-      lastError=new Error(backendMessage(payload, `Rumbo API respondió ${upstream.status}.`));
+      lastError = new Error(backendMessage(payload, `Rumbo API respondió ${upstream.status}.`));
     } catch (error) {
-      lastError=error;
-      if(attempt===2){
+      lastError = error;
+      if (attempt === 2) {
         console.error("admin overview upstream failed", error);
         if (demoMode()) return noStoreJson(developmentAdminPayload());
       }
