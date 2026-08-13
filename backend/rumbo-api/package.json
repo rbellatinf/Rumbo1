@@ -1,27 +1,17 @@
 {
   "name": "rumbo-api",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13.0" },
   "scripts": {
-    "start": "node src/public-edge.mjs",
-    "start:core": "node src/server.mjs",
-    "start:gateway": "node src/gateway.mjs",
-    "start:real": "npm run db:prepare && npm run db:migrate-spree && npm run db:migrate-spree-images && npm run db:validate-spree && npm run db:verify && node src/public-edge.mjs",
-    "dev": "node --watch src/public-edge.mjs",
+    "start": "node src/native-front.mjs",
+    "start:real": "npm run db:prepare && npm run db:verify && node src/native-front.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
-    "db:sync-world-test-images": "node scripts/sync-world-test-catalog-images.mjs",
-    "seed:world-images": "node scripts/sync-world-test-catalog-images.mjs",
-    "db:migrate-spree": "node scripts/migrate-spree-catalog.mjs",
-    "db:migrate-spree-images": "node scripts/migrate-spree-images.mjs",
-    "db:validate-spree": "node scripts/validate-spree-catalog.mjs",
-    "db:verify": "node scripts/verify-db.mjs",
-    "seed:demo": "node scripts/seed-demo.mjs"
+    "db:verify": "node scripts/verify-db.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1098.0",
-    "@aws-sdk/s3-request-presigner": "3.1098.0",
+    "@aws-sdk/client-s3": "^3.876.0",
+    "@aws-sdk/s3-request-presigner": "^3.876.0",
     "bcryptjs": "^3.0.2",
     "express": "^5.1.0",
     "pg": "^8.16.3"
