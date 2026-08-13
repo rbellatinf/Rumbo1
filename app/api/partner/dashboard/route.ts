@@ -18,9 +18,32 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token) return noStoreJson({ message: "No hay una sesión activa." }, 401);
 
+  const headers = providerHeaders(provider, { token });
+  const sessionResponse = await fetch(
+    providerUrl(provider, "/api/access/me", "/api/v3/store/account"),
+    { headers, cache: "no-store" },
+  );
+  const sessionPayload = await parseJson(sessionResponse);
+
+  if (!sessionResponse.ok) {
+    const response = noStoreJson(
+      { message: backendMessage(sessionPayload, "La sesión ya no es válida.") },
+      sessionResponse.status || 401,
+    );
+    if (sessionResponse.status === 401) response.cookies.delete(RUMBO_SESSION_COOKIE);
+    return response;
+  }
+
+  if (sessionPayload?.account?.role !== "partner") {
+    return noStoreJson(
+      { message: "Esta sesión no pertenece a un Partner. Inicia sesión con tu cuenta Partner." },
+      403,
+    );
+  }
+
   const upstream = await fetch(
     providerUrl(provider, "/api/partner/dashboard", "/api/v3/store/partner_dashboard"),
-    { headers: providerHeaders(provider, { token }), cache: "no-store" },
+    { headers, cache: "no-store" },
   );
   const payload = await parseJson(upstream);
 
