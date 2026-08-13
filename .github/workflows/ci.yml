@@ -1,15 +1,10 @@
 name: Validate Rumbo
-
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - "agent/**"
-
+    branches: [main, "agent/**"]
 permissions:
   contents: read
-
 jobs:
   storefront:
     runs-on: ubuntu-latest
@@ -17,21 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22.14.0"
-          cache: npm
+        with: {node-version: "22.14.0", cache: npm}
       - run: npm ci
       - run: npm run lint
       - run: npm test
-
   backend-syntax:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22.14.0"
+        with: {node-version: "22.14.0"}
       - name: Validate native backend
         run: |
           node --check backend/rumbo-api/scripts/prepare-db.mjs
@@ -42,30 +33,23 @@ jobs:
           node --check backend/rumbo-api/src/integration-config-routes.mjs
           node --check backend/rumbo-api/src/integration-observability-routes.mjs
           node --check backend/rumbo-api/src/user-management-routes.mjs
-      - name: Reject legacy runtime
+      - name: Reject legacy commerce runtime
         run: |
           test ! -d backend/spree
           test ! -f lib/spree-catalog.ts
           test ! -f lib/izipay.ts
-          ! grep -R -E 'SPREE_API_URL|X-Spree-API-Key|api/v3/store' app lib backend/rumbo-api render.yaml compose.yaml
-
+          ! grep -R -E 'SPREE_API_URL|X-Spree-API-Key|api/v3/store' app/api/catalog app/api/availability app/api/packages app/api/reservations app/api/payments app/pagar app/native-home lib/pricetravel-packages.ts lib/rumbo-payment-api.ts backend/rumbo-api/src/native-front.mjs backend/rumbo-api/src/native-runtime-routes.mjs backend/rumbo-api/src/runtime-integration-config.mjs render.yaml compose.yaml
   database-migrations:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     services:
       postgres:
         image: postgres:18
-        env:
-          POSTGRES_USER: rumbo
-          POSTGRES_PASSWORD: rumbo-ci
-          POSTGRES_DB: rumbo_production
-        ports:
-          - 5432:5432
+        env: {POSTGRES_USER: rumbo, POSTGRES_PASSWORD: rumbo-ci, POSTGRES_DB: rumbo_production}
+        ports: [5432:5432]
         options: >-
           --health-cmd "pg_isready -U rumbo -d rumbo_production"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       PGPASSWORD: rumbo-ci
       DATABASE_URL: postgresql://rumbo:rumbo-ci@127.0.0.1:5432/rumbo_production
@@ -73,22 +57,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22.14.0"
+        with: {node-version: "22.14.0"}
       - run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
       - name: Apply complete schema twice
-        shell: bash
         run: |
           set -euo pipefail
-          for pass in 1 2; do
-            for file in backend/postgres/init/*.sql; do
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
-            done
-          done
+          for pass in 1 2; do for file in backend/postgres/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null; done; done
       - name: Validate native database runtime
-        shell: bash
         run: |
-          set -euo pipefail
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM pg_proc WHERE proname='rumbo_expire_stale_native_bookings'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_catalog_products'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_booking_payments'")" = "1"
