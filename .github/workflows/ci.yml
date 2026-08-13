@@ -33,6 +33,9 @@ jobs:
           node --check backend/rumbo-api/src/integration-config-routes.mjs
           node --check backend/rumbo-api/src/integration-observability-routes.mjs
           node --check backend/rumbo-api/src/user-management-routes.mjs
+          node --check backend/rumbo-api/src/public-edge.mjs
+          node --check backend/rumbo-api/src/gateway.mjs
+          node --check backend/rumbo-api/src/server.mjs
       - name: Reject legacy commerce runtime
         run: |
           test ! -d backend/spree
@@ -68,9 +71,34 @@ jobs:
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM pg_proc WHERE proname='rumbo_expire_stale_native_bookings'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_catalog_products'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_booking_payments'")" = "1"
-      - name: Import native API modules
+      - name: Install and import native API modules
         run: |
           cd backend/rumbo-api
           npm install --omit=dev
           node -e "import('./src/native-runtime-routes.mjs')"
           node -e "import('./src/runtime-integration-config.mjs')"
+          node -e "import('./src/integration-config-routes.mjs')"
+          node -e "import('./src/integration-observability-routes.mjs')"
+      - name: Smoke native API startup and integrations
+        env:
+          RUMBO_API_KEY: rumbo-ci-key
+          RUMBO_DEMO_MODE: "true"
+          PORT: "4100"
+        run: |
+          set -euo pipefail
+          cd backend/rumbo-api
+          node src/native-front.mjs >/tmp/rumbo-api-smoke.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true; cat /tmp/rumbo-api-smoke.log' EXIT
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4100/health >/tmp/rumbo-health.json; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          grep -q 'rumbo-native-front' /tmp/rumbo-health.json
+          curl -fsS \
+            -H 'X-Rumbo-API-Key: rumbo-ci-key' \
+            -H 'X-Rumbo-Demo-Role: wholesaler_admin' \
+            http://127.0.0.1:4100/api/admin/integration-configs >/tmp/rumbo-integrations.json
+          node -e "const p=require('/tmp/rumbo-integrations.json'); if(!Array.isArray(p.integrations)||p.integrations.length<4) process.exit(1)"
