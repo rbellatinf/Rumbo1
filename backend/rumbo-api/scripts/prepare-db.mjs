@@ -29,6 +29,7 @@ const migrations = [
   "101_rumbo_integration_configs.sql",
   "101_rumbo_test_catalog_seed.sql",
   "102_rumbo_world_test_catalog_seed.sql",
+  "103_rumbo_test_user_credentials.sql",
 ];
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
