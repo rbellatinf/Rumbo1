@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import PublicAccessMenu from "./PublicAccessMenu";
 import StorefrontPreferences from "./storefront-preferences";
 import StorefrontSearchRouter from "./storefront-search-router";
 
@@ -38,6 +39,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        <PublicAccessMenu />
         <StorefrontPreferences />
         <StorefrontSearchRouter />
       </body>
