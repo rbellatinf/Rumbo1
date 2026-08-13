@@ -47,13 +47,24 @@ export function providerHeaders(
   return headers;
 }
 
+function upstreamTextMessage(text: string, status: number) {
+  const compact = text.trim();
+  const isHtml = /^\s*<!doctype\s+html/i.test(compact) || /^\s*<html[\s>]/i.test(compact);
+  if (isHtml) {
+    return status >= 500
+      ? `Rumbo API está iniciando o temporalmente no disponible (HTTP ${status}).`
+      : `El servicio respondió en un formato inesperado (HTTP ${status}).`;
+  }
+  return compact.replace(/\s+/g, " ").slice(0, 300) || `El servicio respondió HTTP ${status}.`;
+}
+
 export async function parseJson(response: Response) {
   const text = await response.text();
   if (!text) return {};
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
-    return { error: { message: text.slice(0, 300) } };
+    return { error: { message: upstreamTextMessage(text, response.status) } };
   }
 }
 
