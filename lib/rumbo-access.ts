@@ -4,7 +4,7 @@ export const RUMBO_SESSION_COOKIE = "rumbo_session";
 export const DEFAULT_RUMBO_API_URL = "https://rumbo-api-4twt.onrender.com";
 
 export type AccessProvider = {
-  kind: "rumbo" | "spree";
+  kind: "rumbo";
   apiUrl: string;
   apiKey?: string;
 };
@@ -20,17 +20,19 @@ function normalizeServiceUrl(value: string | undefined) {
 }
 
 export function accessConfiguration(): AccessProvider | null {
-  const rumboUrl = normalizeServiceUrl(process.env.RUMBO_API_URL) || DEFAULT_RUMBO_API_URL;
-  const rumboKey = process.env.RUMBO_API_KEY?.trim() || undefined;
-  if (rumboUrl) return { kind: "rumbo", apiUrl: rumboUrl, apiKey: rumboKey };
-
-  const spreeUrl = normalizeServiceUrl(process.env.SPREE_API_URL);
-  const spreeKey = process.env.SPREE_PUBLISHABLE_API_KEY?.trim() || undefined;
-  return spreeUrl ? { kind: "spree", apiUrl: spreeUrl, apiKey: spreeKey } : null;
+  const apiUrl = normalizeServiceUrl(process.env.RUMBO_API_URL) || DEFAULT_RUMBO_API_URL;
+  if (!apiUrl) return null;
+  return {
+    kind: "rumbo",
+    apiUrl,
+    apiKey: process.env.RUMBO_API_KEY?.trim() || undefined,
+  };
 }
 
-export function providerUrl(provider: AccessProvider, rumboPath: string, spreePath: string) {
-  return `${provider.apiUrl}${provider.kind === "rumbo" ? rumboPath : spreePath}`;
+// Third arg kept temporarily for callers being simplified in this cutover.
+// It is ignored: Rumbo API is the only runtime backend.
+export function providerUrl(provider: AccessProvider, rumboPath: string, _removedLegacyPath?: string) {
+  return `${provider.apiUrl}${rumboPath}`;
 }
 
 export function providerHeaders(
@@ -38,10 +40,10 @@ export function providerHeaders(
   options: { token?: string; json?: boolean; demoRole?: "wholesaler_admin" | "partner" | "retailer" } = {},
 ): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (provider.apiKey) headers[provider.kind === "rumbo" ? "X-Rumbo-API-Key" : "X-Spree-API-Key"] = provider.apiKey;
+  if (provider.apiKey) headers["X-Rumbo-API-Key"] = provider.apiKey;
   if (options.json) headers["Content-Type"] = "application/json";
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
-  if (provider.kind === "rumbo" && demoMode() && options.demoRole) headers["X-Rumbo-Demo-Role"] = options.demoRole;
+  if (demoMode() && options.demoRole) headers["X-Rumbo-Demo-Role"] = options.demoRole;
   return headers;
 }
 
@@ -60,6 +62,7 @@ export function backendMessage(payload: Record<string, unknown>, fallback: strin
   if (error && typeof error === "object" && typeof (error as Record<string, unknown>).message === "string") {
     return (error as Record<string, string>).message;
   }
+  if (typeof payload.message === "string") return payload.message;
   return fallback;
 }
 
