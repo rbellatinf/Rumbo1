@@ -15,46 +15,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22.14.0"
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Test
-        run: npm test
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
 
   backend-syntax:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22.14.0"
-
-      - name: Validate backend and migration scripts
+      - name: Validate native backend
         run: |
-          node --check backend/rumbo-api/scripts/migrate-spree-catalog.mjs
-          node --check backend/rumbo-api/scripts/migrate-spree-images.mjs
-          node --check backend/rumbo-api/scripts/validate-spree-catalog.mjs
           node --check backend/rumbo-api/scripts/prepare-db.mjs
-          node --check backend/rumbo-api/scripts/sync-world-test-catalog-images.mjs
-          node --check backend/rumbo-api/src/integration-observability-routes.mjs
+          node --check backend/rumbo-api/scripts/verify-db.mjs
+          node --check backend/rumbo-api/src/native-front.mjs
+          node --check backend/rumbo-api/src/native-runtime-routes.mjs
+          node --check backend/rumbo-api/src/runtime-integration-config.mjs
           node --check backend/rumbo-api/src/integration-config-routes.mjs
+          node --check backend/rumbo-api/src/integration-observability-routes.mjs
           node --check backend/rumbo-api/src/user-management-routes.mjs
+      - name: Reject legacy runtime
+        run: |
+          test ! -d backend/spree
+          test ! -f lib/spree-catalog.ts
+          test ! -f lib/izipay.ts
+          ! grep -R -E 'SPREE_API_URL|X-Spree-API-Key|api/v3/store' app lib backend/rumbo-api render.yaml compose.yaml
 
   database-migrations:
     runs-on: ubuntu-latest
@@ -78,95 +71,30 @@ jobs:
       DATABASE_URL: postgresql://rumbo:rumbo-ci@127.0.0.1:5432/rumbo_production
       PGSSLMODE: disable
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22.14.0"
-
-      - name: Install PostgreSQL client
-        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
-
-      - name: Apply complete Rumbo schema
+      - run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Apply complete schema twice
         shell: bash
         run: |
           set -euo pipefail
-          for file in backend/postgres/init/*.sql; do
-            echo "Applying ${file}"
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+          for pass in 1 2; do
+            for file in backend/postgres/init/*.sql; do
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
+            done
           done
-
-      - name: Reapply complete schema
+      - name: Validate native database runtime
         shell: bash
         run: |
           set -euo pipefail
-          for file in backend/postgres/init/*.sql; do
-            echo "Reapplying ${file}"
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
-          done
-
-      - name: Validate world storefront seed
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_products WHERE metadata->>'test_group'='storefront-world'")" = "4"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_departures d JOIN rumbo_catalog_products p ON p.id=d.product_id WHERE p.metadata->>'test_group'='storefront-world'")" = "4"
-
-      - name: Install Rumbo API dependencies
-        run: cd backend/rumbo-api && npm install --omit=dev
-
-      - name: Smoke test Rumbo API imports and R2 seed sync
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM pg_proc WHERE proname='rumbo_expire_stale_native_bookings'")" = "1"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_catalog_products'")" = "1"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_booking_payments'")" = "1"
+      - name: Import native API modules
         run: |
           cd backend/rumbo-api
-          node -e "import('./src/integration-config-routes.mjs')"
-          node scripts/sync-world-test-catalog-images.mjs
-
-      - name: Seed minimal Spree catalog fixture
-        shell: bash
-        run: |
-          set -euo pipefail
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE TABLE spree_products (
-            id bigint PRIMARY KEY,
-            name text,
-            slug text,
-            description text,
-            meta_description text,
-            available_on timestamptz,
-            deleted_at timestamptz,
-            updated_at timestamptz
-          );
-          CREATE TABLE spree_variants (
-            id bigint PRIMARY KEY,
-            product_id bigint,
-            is_master boolean,
-            sku text,
-            cost_price numeric,
-            cost_currency text,
-            deleted_at timestamptz
-          );
-          CREATE TABLE spree_prices (
-            id bigint PRIMARY KEY,
-            variant_id bigint,
-            amount numeric,
-            currency text,
-            deleted_at timestamptz
-          );
-          INSERT INTO spree_products(id,name,slug,description,available_on,updated_at)
-          VALUES(900001,'CI Migration Fixture','ci-migration-fixture','Regression fixture',now()-interval '1 day',now());
-          INSERT INTO spree_variants(id,product_id,is_master,sku,cost_price,cost_currency)
-          VALUES(910001,900001,true,'CI-FIXTURE',80,'USD');
-          INSERT INTO spree_prices(id,variant_id,amount,currency)
-          VALUES(920001,910001,100,'USD');
-          SQL
-
-      - name: Run Spree catalog migration twice
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd backend/rumbo-api
-          node scripts/migrate-spree-catalog.mjs
-          node scripts/migrate-spree-catalog.mjs
-          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_departure_source_links WHERE source_system='spree' AND source_id='900001:910001:USD'")" = "1"
+          npm install --omit=dev
+          node -e "import('./src/native-runtime-routes.mjs')"
+          node -e "import('./src/runtime-integration-config.mjs')"

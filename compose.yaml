@@ -14,36 +14,29 @@ services:
       - rumbo_postgres_data:/var/lib/postgresql/data
       - ./backend/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-rumbo} -d ${POSTGRES_DB:-rumbo_production}",
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rumbo} -d ${POSTGRES_DB:-rumbo_production}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  spree:
-    image: ghcr.io/spree/spree:5.4.0
-    restart: unless-stopped
+  rumbo-api:
+    image: node:22-alpine
+    working_dir: /workspace/backend/rumbo-api
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./:/workspace
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-rumbo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rumbo_production}
-      SECRET_KEY_BASE: ${SPREE_SECRET_KEY_BASE}
-      RAILS_HOST: ${SPREE_RAILS_HOST:-localhost:3000}
-      RAILS_FORCE_SSL: ${RAILS_FORCE_SSL:-false}
-      RAILS_ASSUME_SSL: ${RAILS_ASSUME_SSL:-false}
-      SOLID_QUEUE_IN_PUMA: "true"
+      PGSSLMODE: disable
+      RUMBO_API_KEY: ${RUMBO_API_KEY}
+      RUMBO_INTEGRATION_MASTER_KEY: ${RUMBO_INTEGRATION_MASTER_KEY}
+      RUMBO_PAYMENT_CHECKOUT_SECRET: ${RUMBO_PAYMENT_CHECKOUT_SECRET}
+      RUMBO_PUBLIC_URL: ${RUMBO_PUBLIC_URL:-http://localhost:3001}
+    command: sh -c "npm install --omit=dev && npm run start:real"
     ports:
-      - "3000:3000"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/up || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 40s
+      - "4000:4000"
 
 volumes:
   rumbo_postgres_data:
