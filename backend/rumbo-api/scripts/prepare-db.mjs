@@ -10,27 +10,12 @@ if (!process.env.DATABASE_URL) {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const migrations = [
-  "070_rumbo_catalog.sql",
-  "071_rumbo_catalog_search.sql",
-  "072_rumbo_catalog_commercial_rules.sql",
-  "080_rumbo_native_bookings.sql",
-  "090_rumbo_retailer_users.sql",
-  "091_rumbo_test_accounts.sql",
-  "092_rumbo_password_reset.sql",
-  "093_rumbo_demo_directory.sql",
-  "094_rumbo_pricing_engine.sql",
-  "095_rumbo_user_agency_management.sql",
-  "096_rumbo_person_details.sql",
-  "097_rumbo_catalog_taxonomy_migration.sql",
-  "098_rumbo_catalog_geography_autofill.sql",
-  "099_rumbo_catalog_image_storage.sql",
-  "100_rumbo_integration_observability.sql",
-  "101_rumbo_integration_configs.sql",
-  "101_rumbo_test_catalog_seed.sql",
-  "102_rumbo_world_test_catalog_seed.sql",
-  "103_rumbo_test_user_credentials.sql",
-];
+const initDir = path.resolve(here, "../../postgres/init");
+const migrations = (await fs.readdir(initDir))
+  .filter((file) => /^\d+_.+\.sql$/.test(file))
+  .filter((file) => Number(file.match(/^(\d+)_/)?.[1] || 0) >= 70)
+  .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
@@ -38,11 +23,12 @@ const pool = new Pool({
 
 try {
   for (const file of migrations) {
-    const migrationPath = path.resolve(here, `../../postgres/init/${file}`);
+    const migrationPath = path.join(initDir, file);
     const sql = await fs.readFile(migrationPath, "utf8");
     await pool.query(sql);
     console.log(`Rumbo DB prepare OK: ${file}`);
   }
+  console.log(`Rumbo DB prepare complete: ${migrations.length} migrations (${migrations.at(-1) || "none"}).`);
 } catch (error) {
   console.error("No se pudo preparar PostgreSQL:", error.message);
   process.exitCode = 1;
