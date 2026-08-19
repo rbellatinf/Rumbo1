@@ -64,9 +64,11 @@ export async function fetchRumboApi(
   let lastError:unknown;
   for(let attempt=0;attempt<attempts;attempt+=1){
     try{
+      const headers=new Headers(init.headers);
+      for(const [key,value] of Object.entries(providerHeaders(provider)))if(!headers.has(key))headers.set(key,value);
       const response=await fetch(`${provider.apiUrl}${path}`,{
         ...init,
-        headers:{...providerHeaders(provider),...(init.headers||{})},
+        headers,
         cache:init.cache??"no-store",
         signal:init.signal??AbortSignal.timeout(timeoutMs),
       });
