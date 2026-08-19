@@ -29,6 +29,7 @@ jobs:
           node --check backend/rumbo-api/scripts/verify-db.mjs
           node --check backend/rumbo-api/src/native-front.mjs
           node --check backend/rumbo-api/src/native-runtime-routes.mjs
+          node --check backend/rumbo-api/src/airlabs-runtime-routes.mjs
           node --check backend/rumbo-api/src/runtime-integration-config.mjs
           node --check backend/rumbo-api/src/integration-config-routes.mjs
           node --check backend/rumbo-api/src/integration-observability-routes.mjs
@@ -71,11 +72,14 @@ jobs:
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM pg_proc WHERE proname='rumbo_expire_stale_native_bookings'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_catalog_products'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_booking_payments'")" = "1"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_airport_search_cache'")" = "1"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_products WHERE metadata->>'test_seed'='true'")" -ge "10"
       - name: Install and import native API modules
         run: |
           cd backend/rumbo-api
           npm install --omit=dev
           node -e "import('./src/native-runtime-routes.mjs')"
+          node -e "import('./src/airlabs-runtime-routes.mjs')"
           node -e "import('./src/runtime-integration-config.mjs')"
           node -e "import('./src/integration-config-routes.mjs')"
           node -e "import('./src/integration-observability-routes.mjs')"
@@ -83,6 +87,7 @@ jobs:
         env:
           RUMBO_API_KEY: rumbo-ci-key
           RUMBO_DEMO_MODE: "true"
+          RUMBO_LOAD_SAMPLE_CATALOG: "true"
           PORT: "4100"
         run: |
           set -euo pipefail
@@ -102,3 +107,5 @@ jobs:
             -H 'X-Rumbo-Demo-Role: wholesaler_admin' \
             http://127.0.0.1:4100/api/admin/integration-configs >/tmp/rumbo-integrations.json
           node -e "const p=require('/tmp/rumbo-integrations.json'); if(!Array.isArray(p.integrations)||p.integrations.length<4) process.exit(1)"
+          curl -fsS -H 'X-Rumbo-API-Key: rumbo-ci-key' http://127.0.0.1:4100/api/catalog >/tmp/rumbo-catalog.json
+          node -e "const p=require('/tmp/rumbo-catalog.json'); if(!Array.isArray(p.products)||p.products.length<10) process.exit(1)"

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 const clean=(value)=>String(value??"").trim();
 const DEFINITIONS={
+  airlabs:{publicKeys:["base_url"],secretKeys:["api_key"],requiredPublic:[],requiredSecrets:["api_key"],defaults:{base_url:"https://airlabs.co/api/v9"},env:{base_url:"AIRLABS_API_BASE_URL",api_key:"AIRLABS_API_KEY"}},
   pricetravel:{publicKeys:["api_url","packages_path"],secretKeys:["username","password"],requiredPublic:["api_url","packages_path"],requiredSecrets:["username","password"],defaults:{},env:{api_url:"PRICETRAVEL_API_URL",packages_path:"PRICETRAVEL_PACKAGES_PATH",username:"PRICETRAVEL_USERNAME",password:"PRICETRAVEL_PASSWORD"}},
   izipay:{publicKeys:["api_url"],secretKeys:["username","password","public_key","hmac_key"],requiredPublic:["api_url"],requiredSecrets:["username","password","public_key","hmac_key"],defaults:{api_url:"https://api.micuentaweb.pe"},env:{api_url:"IZIPAY_API_URL",username:"IZIPAY_USERNAME",password:"IZIPAY_PASSWORD",public_key:"IZIPAY_PUBLIC_KEY",hmac_key:"IZIPAY_HMAC_SHA256_KEY"}},
 };

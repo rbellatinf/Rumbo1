@@ -85,9 +85,9 @@ async function probeConfig(pool,code){
   const cfg=await resolvedConfig(pool,code);if(!cfg?.configured)return{success:false,http_status:null,duration_ms:0,message:"Faltan campos obligatorios de configuración."};
   try{
     if(code==="airlabs"){
-      const base=safeUrl(cfg.publicConfig.base_url,"https://airlabs.co/api/v9"),query=new URLSearchParams({q:"LIM",lang:"es",api_key:cfg.secrets.api_key,_fields:"name,iata_code,city,country_code"});
-      const {response,duration}=await timedFetch(`${base}/suggest?${query}`);const payload=await response.json().catch(()=>({}));const success=response.ok&&!payload?.error;
-      return{success,http_status:response.status,duration_ms:duration,message:success?"AirLabs respondió correctamente.":"AirLabs rechazó la conexión.",details:{test_query:"LIM"}};
+      const base=safeUrl(cfg.publicConfig.base_url,"https://airlabs.co/api/v9"),query=new URLSearchParams({q:"LIM",lang:"es",api_key:cfg.secrets.api_key,_fields:"name,iata_code,icao_code,city,country_code,popularity,is_major,is_international"});
+      const {response,duration}=await timedFetch(`${base}/suggest?${query}`);const payload=await response.json().catch(()=>({})),rows=suggestAirportRows(payload),airports=rows.map(mapAirport).filter(Boolean);const success=response.ok&&!payload?.error&&airports.length>0;
+      return{success,http_status:response.status,duration_ms:duration,message:success?`AirLabs respondió correctamente (${airports.length} aeropuerto(s) interpretados).`:response.ok?"AirLabs respondió, pero Rumbo no pudo interpretar ningún aeropuerto.":"AirLabs rechazó la conexión.",details:{test_query:"LIM",results:airports.length}};
     }
     if(code==="pricetravel"){
       const base=safeUrl(cfg.publicConfig.api_url),path=clean(cfg.publicConfig.packages_path),endpoint=path.startsWith("/")?path:`/${path}`,auth=Buffer.from(`${cfg.secrets.username}:${cfg.secrets.password}`).toString("base64");
@@ -130,6 +130,16 @@ function resolveCountry(query){
 function countryName(code){try{return new Intl.DisplayNames(["es"],{type:"region"}).of(code)||code}catch{return code}}
 function mapAirport(item){const iata=clean(item?.iata_code).toUpperCase();if(!/^[A-Z]{3}$/.test(iata))return null;const name=clean(item?.name)||iata,city=clean(item?.city)||name,cc=clean(item?.country_code).toUpperCase();return{id:`AIRPORT-${clean(item?.icao_code)||iata}`,iataCode:iata,name,cityName:city,countryName:countryName(cc),subType:"AIRPORT",label:`${city} (${iata}) · ${name}${cc?`, ${countryName(cc)}`:""}`}}
 function listPayload(payload){if(Array.isArray(payload))return payload;if(Array.isArray(payload?.response))return payload.response;return[]}
+function suggestAirportRows(payload){
+  const source=payload?.response??payload;
+  if(Array.isArray(source))return source;
+  if(!source||typeof source!=="object")return[];
+  return [
+    ...(Array.isArray(source.airports)?source.airports:[]),
+    ...(Array.isArray(source.airports_by_cities)?source.airports_by_cities:[]),
+    ...(Array.isArray(source.airports_by_countries)?source.airports_by_countries:[]),
+  ];
+}
 
 export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
   // Compatibility fix: this handler runs before the older person-detail route and
@@ -183,7 +193,7 @@ export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
   });
 
   app.get('/api/integrations/airlabs/airports',async(req,res)=>{
-    const q=clean(req.query.q).slice(0,80);if(q.length<2)return res.status(422).json({error:{message:'Escribe al menos dos caracteres.'}});
+    const q=clean(req.query.q).slice(0,30);if(q.length<3)return res.status(422).json({error:{message:'Escribe al menos tres caracteres.'}});
     try{
       const cfg=await resolvedConfig(pool,'airlabs');if(!cfg?.configured)return res.status(503).json({error:{message:'AirLabs no está configurada en Administración → APIs.'}});
       const base=safeUrl(cfg.publicConfig.base_url,'https://airlabs.co/api/v9'),country=resolveCountry(q),started=Date.now();let providerRows=[],responseStatus=200;
@@ -192,12 +202,12 @@ export function installIntegrationConfigRoutes(app,{pool,requireAdmin,audit}){
         const attempt=await timedFetch(`${base}/airports?${params}`);responseStatus=attempt.response.status;if(!attempt.response.ok)throw new Error(`AirLabs airports returned ${attempt.response.status}`);providerRows=listPayload(await attempt.response.json());
       }else{
         const params=new URLSearchParams({q,lang:'es',api_key:cfg.secrets.api_key,_fields:'name,iata_code,icao_code,city,city_code,country_code,popularity,is_major,is_international'});
-        const attempt=await timedFetch(`${base}/suggest?${params}`);responseStatus=attempt.response.status;if(!attempt.response.ok)throw new Error(`AirLabs suggest returned ${attempt.response.status}`);const payload=await attempt.response.json(),source=payload?.response||payload;providerRows=[...(source?.airports||[]),...(source?.airports_by_cities||[]),...(source?.airports_by_countries||[])];
+        const attempt=await timedFetch(`${base}/suggest?${params}`);responseStatus=attempt.response.status;if(!attempt.response.ok)throw new Error(`AirLabs suggest returned ${attempt.response.status}`);providerRows=suggestAirportRows(await attempt.response.json());
       }
       providerRows.sort((a,b)=>Number(b?.is_major||0)-Number(a?.is_major||0)||Number(b?.is_international||0)-Number(a?.is_international||0)||Number(b?.popularity||0)-Number(a?.popularity||0));
       const seen=new Set(),airports=[];for(const item of providerRows){const mapped=mapAirport(item);if(!mapped||seen.has(mapped.iataCode))continue;seen.add(mapped.iataCode);airports.push(mapped);if(airports.length>=60)break}
       try{await pool.query(`INSERT INTO rumbo_integration_calls(integration_code,service_code,source,success,http_status,duration_ms,request_summary,response_summary) VALUES('airlabs','airport-suggest','storefront',true,$1,$2,$3::jsonb,$4::jsonb)`,[responseStatus,Date.now()-started,JSON.stringify({query:q,country_code:country?.code||null}),JSON.stringify({results:airports.length})])}catch{}
-      res.json({mode:'live',provider:'AirLabs',airports,message:country?`Aeropuertos de ${countryName(country.code)} consultados en AirLabs.`:'Aeropuertos consultados en AirLabs.'});
+      res.json({mode:'live',provider:'AirLabs',airports,message:country?`Aeropuertos de ${countryName(country.code)} consultados en AirLabs.`:`AirLabs devolvió ${airports.length} aeropuerto(s).`});
     }catch(error){console.error(error);res.status(502).json({error:{message:error instanceof Error?error.message:'AirLabs no respondió.'}})}
   });
 }

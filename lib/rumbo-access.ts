@@ -47,6 +47,41 @@ export function providerHeaders(
   return headers;
 }
 
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+
+/**
+ * Server-side fetch for the Render-hosted Rumbo API.
+ * Retries only transient infrastructure responses/network errors so a cold start
+ * does not make the storefront look as if the catalog or integrations vanished.
+ */
+export async function fetchRumboApi(
+  provider: AccessProvider,
+  path: string,
+  init: RequestInit = {},
+  options: { attempts?: number; timeoutMs?: number } = {},
+) {
+  const attempts=Math.max(1,options.attempts??4),timeoutMs=Math.max(1000,options.timeoutMs??15000);
+  let lastError:unknown;
+  for(let attempt=0;attempt<attempts;attempt+=1){
+    try{
+      const headers=new Headers(init.headers);
+      for(const [key,value] of Object.entries(providerHeaders(provider)))if(!headers.has(key))headers.set(key,value);
+      const response=await fetch(`${provider.apiUrl}${path}`,{
+        ...init,
+        headers,
+        cache:init.cache??"no-store",
+        signal:init.signal??AbortSignal.timeout(timeoutMs),
+      });
+      if(![502,503,504].includes(response.status)||attempt===attempts-1)return response;
+    }catch(error){
+      lastError=error;
+      if(attempt===attempts-1)throw error;
+    }
+    await sleep([900,1800,3200][Math.min(attempt,2)]);
+  }
+  throw lastError instanceof Error?lastError:new Error("Rumbo API no respondió.");
+}
+
 function upstreamTextMessage(text: string, status: number) {
   const compact = text.trim();
   const isHtml = /^\s*<!doctype\s+html/i.test(compact) || /^\s*<html[\s>]/i.test(compact);

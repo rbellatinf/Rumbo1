@@ -10,7 +10,9 @@ export type AirportOption = {
 
 export type AirportSearchResult = {
   mode: "live" | "error";
-  provider: "AirLabs";
+  provider: "AirLabs" | "Rumbo";
+  source?: "live" | "cache" | "stale_cache" | "catalog";
+  cached?: boolean;
   airports: AirportOption[];
   message: string;
   upstreamStatus?: number;
