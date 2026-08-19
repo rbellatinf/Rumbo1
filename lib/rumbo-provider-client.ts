@@ -8,6 +8,19 @@ export function rumboProvider(){
  return{apiUrl,headers};
 }
 
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+export async function fetchRumboProvider(url:string,init:RequestInit={},attempts=4){
+ let lastError:unknown;
+ for(let attempt=0;attempt<attempts;attempt+=1){
+  try{
+   const response=await fetch(url,{...init,cache:init.cache??"no-store",signal:init.signal??AbortSignal.timeout(15000)});
+   if(![502,503,504].includes(response.status)||attempt===attempts-1)return response;
+  }catch(error){lastError=error;if(attempt===attempts-1)throw error}
+  await sleep([900,1800,3200][Math.min(attempt,2)]);
+ }
+ throw lastError instanceof Error?lastError:new Error("Rumbo API no respondió.");
+}
+
 export async function parseProviderJson(response:Response):Promise<ProviderPayload>{
  const text=await response.text();
  if(!text)return{};
