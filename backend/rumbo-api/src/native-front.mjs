@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import express from "express";
 import pg from "pg";
+import { installAirLabsRuntimeRoutes } from "./airlabs-runtime-routes.mjs";
 import { installIntegrationConfigRoutes } from "./integration-config-routes.mjs";
 import { installIntegrationObservabilityRoutes } from "./integration-observability-routes.mjs";
 import { installNativeRuntimeRoutes } from "./native-runtime-routes.mjs";
@@ -96,8 +97,9 @@ async function audit(actor, action, entityType, entityId, details = {}) {
   );
 }
 
-// Keep integration configuration/telemetry at the native outer edge. They were
-// previously present as modules but never registered in the running API process.
+// Exact AirLabs routes are mounted first so caching/rate-limit handling takes
+// precedence over the older generic integration handlers during the cutover.
+installAirLabsRuntimeRoutes(app, { pool, requireAdmin, audit });
 installIntegrationConfigRoutes(app, { pool, requireAdmin, audit });
 installIntegrationObservabilityRoutes(app, { pool, requireAdmin, audit });
 installNativeRuntimeRoutes(app, { pool });
