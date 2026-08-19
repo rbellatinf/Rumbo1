@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   accessConfiguration,
   backendMessage,
+  fetchRumboApi,
   parseJson,
-  providerHeaders,
 } from "../../../lib/rumbo-access";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const keyword = request.nextUrl.searchParams.get("q")?.trim() || "";
+  const keyword = request.nextUrl.searchParams.get("q")?.trim().slice(0,30) || "";
 
   if (keyword.length < 3) {
     return NextResponse.json(
@@ -37,12 +37,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(
-      `${provider.apiUrl}/api/integrations/airlabs/airports?q=${encodeURIComponent(keyword)}`,
-      {
-        headers: providerHeaders(provider),
-        cache: "no-store",
-      },
+    const response = await fetchRumboApi(
+      provider,
+      `/api/integrations/airlabs/airports?q=${encodeURIComponent(keyword)}`,
     );
     const payload = await parseJson(response);
 
@@ -70,14 +67,14 @@ export async function GET(request: NextRequest) {
       {
         ...payload,
         mode: "live",
-        provider: "AirLabs",
+        provider: typeof payload.provider === "string" ? payload.provider : "AirLabs",
         airports,
         message:
           typeof payload.message === "string"
             ? payload.message
-            : `AirLabs respondió con ${airports.length} resultado(s).`,
+            : `Encontramos ${airports.length} aeropuerto(s).`,
       },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: { "Cache-Control": "private, max-age=60" } },
     );
   } catch (error) {
     return NextResponse.json(
