@@ -11,13 +11,13 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const keyword = request.nextUrl.searchParams.get("q")?.trim() || "";
 
-  if (keyword.length < 2) {
+  if (keyword.length < 3) {
     return NextResponse.json(
       {
         mode: "error",
         provider: "AirLabs",
         airports: [],
-        message: "Escribe al menos dos letras para buscar un aeropuerto.",
+        message: "Escribe al menos tres letras para buscar un aeropuerto.",
       },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
