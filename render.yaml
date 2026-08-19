@@ -49,6 +49,8 @@ services:
         generateValue: true
       - key: RUMBO_DEMO_MODE
         value: "false"
+      - key: RUMBO_LOAD_SAMPLE_CATALOG
+        value: "true"
       - key: RUMBO_ADMIN_EMAIL
         sync: false
       - key: RUMBO_ADMIN_PASSWORD
