@@ -14,6 +14,8 @@ function dateFromNow(days: number) {
   return value.toISOString().slice(0, 10);
 }
 
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export default function NativeHome() {
   const [activeProduct, setActiveProduct] = useState<ProductType>("packages");
   const [origin, setOrigin] = useState("Lima (LIM)");
@@ -34,25 +36,37 @@ export default function NativeHome() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/catalog", { cache: "no-store" })
-      .then(async (response) => {
-        const body = (await response.json()) as { packages?: TravelPackage[]; message?: string };
-        if (!response.ok) throw new Error(body.message || `Catálogo respondió HTTP ${response.status}`);
-        return body;
-      })
-      .then((body) => {
-        if (!active) return;
-        setDeals(Array.isArray(body.packages) ? body.packages : []);
-        setState("live");
-        setProvider("Rumbo");
-        setMessage(body.message || "Catálogo nativo conectado.");
-      })
-      .catch((reason) => {
-        if (!active) return;
-        setDeals([]);
-        setState("error");
-        setMessage(reason instanceof Error ? reason.message : "No pudimos consultar el catálogo.");
-      });
+
+    async function loadCatalog() {
+      let lastError = "No pudimos consultar el catálogo.";
+      for (let attempt = 0; attempt < 4 && active; attempt += 1) {
+        if (attempt > 0) {
+          setState("loading");
+          setMessage("Rumbo API está iniciando; reconectando al catálogo real…");
+          await sleep([2500, 4500, 7000][Math.min(attempt - 1, 2)]);
+        }
+        try {
+          const response = await fetch("/api/catalog", { cache: "no-store" });
+          const body = (await response.json()) as { packages?: TravelPackage[]; message?: string };
+          if (!response.ok) throw new Error(body.message || `Catálogo respondió HTTP ${response.status}`);
+          if (!active) return;
+          setDeals(Array.isArray(body.packages) ? body.packages : []);
+          setState("live");
+          setProvider("Rumbo");
+          setMessage(body.message || "Catálogo nativo conectado.");
+          setError("");
+          return;
+        } catch (reason) {
+          lastError = reason instanceof Error ? reason.message : "No pudimos consultar el catálogo.";
+        }
+      }
+      if (!active) return;
+      setState("error");
+      setMessage(lastError);
+      setError(lastError);
+    }
+
+    void loadCatalog();
     return () => {
       active = false;
     };
@@ -111,10 +125,9 @@ export default function NativeHome() {
       window.setTimeout(() => document.getElementById("ofertas")?.scrollIntoView({ behavior: "smooth" }), 50);
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : "No pudimos completar la búsqueda.";
-      setDeals([]);
       setMessage(text);
       setError(text);
-      setState("error");
+      setState(deals.length ? "live" : "error");
     } finally {
       setSearching(false);
     }
