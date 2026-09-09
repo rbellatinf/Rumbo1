@@ -74,7 +74,7 @@ services:
 
 databases:
   - name: rumbo1-postgres
-    plan: free
+    plan: 0.1c-256mb
     region: oregon
     databaseName: rumbo_production
     postgresMajorVersion: "18"
