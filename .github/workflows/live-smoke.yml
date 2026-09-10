@@ -1,0 +1,32 @@
+name: Verify live Rumbo API
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/live-smoke.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check deployed API health
+        shell: bash
+        run: |
+          set -u
+          endpoint="https://rumbo-api-4twt.onrender.com/health"
+          for attempt in $(seq 1 9); do
+            code=$(curl --silent --show-error --max-time 10 --output /tmp/rumbo-health.txt --write-out '%{http_code}' "$endpoint" || true)
+            body=$(head -c 400 /tmp/rumbo-health.txt 2>/dev/null || true)
+            echo "ATTEMPT=$attempt HTTP=$code BODY=$body"
+            if [ "$code" = "200" ]; then
+              echo "RESULT=healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "RESULT=unhealthy"
+          exit 0
