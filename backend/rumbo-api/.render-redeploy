@@ -1,2 +1,2 @@
-Force rumbo-api redeploy after PostgreSQL billing recovery.
-2026-09-10T15:31:04Z
+Apply native catalog carousel migration after PostgreSQL recovery.
+2026-09-10T16:12:15Z
