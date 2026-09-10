@@ -74,6 +74,7 @@ jobs:
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_booking_payments'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_name='rumbo_airport_search_cache'")" = "1"
           test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM rumbo_catalog_products WHERE metadata->>'test_seed'='true'")" -ge "10"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT count(*) FROM (SELECT product_id FROM rumbo_catalog_images GROUP BY product_id HAVING count(*)>=2) carousel_products")" -ge "4"
       - name: Install and import native API modules
         run: |
           cd backend/rumbo-api
