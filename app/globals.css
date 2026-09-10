@@ -742,7 +742,8 @@ label.search-field {
 .deal-image {
   position: relative;
   min-height: 230px;
-  background-size: cover;
+  overflow: hidden;
+  background: #e8edf2;
 }
 
 .deal-tag {
@@ -755,6 +756,7 @@ label.search-field {
   color: var(--navy);
   font-size: 11px;
   font-weight: 750;
+  z-index: 5;
 }
 
 .favorite-button {
@@ -769,6 +771,8 @@ label.search-field {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.92);
   color: var(--navy);
+  z-index: 5;
+  cursor: pointer;
 }
 
 .favorite-button svg {

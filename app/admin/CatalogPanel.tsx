@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { Pencil } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImagePlus, Pencil, Star } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Departure = {
@@ -17,6 +17,14 @@ type Departure = {
   capacity?: number | null;
   available_capacity?: number | null;
   status: string;
+};
+
+type CatalogImage = {
+  id: string;
+  url: string;
+  alt_text?: string | null;
+  sort_order?: number;
+  is_primary?: boolean;
 };
 
 type Product = {
@@ -41,6 +49,7 @@ type Product = {
   active_departure_count?: number;
   departures?: Departure[];
   image_url?: string | null;
+  images?: CatalogImage[];
 };
 
 type UploadResult = {
@@ -74,14 +83,26 @@ async function uploadToCloudflare(file: File): Promise<UploadResult> {
   return payload as UploadResult;
 }
 
-async function attachPrimaryImage(productId: string, uploaded: UploadResult, altText: string) {
+async function attachCatalogImage(productId: string, uploaded: UploadResult, altText: string, isPrimary: boolean, sortOrder: number) {
   const response = await fetch(`/api/admin/catalog/${encodeURIComponent(productId)}/images`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: uploaded.url, alt_text: altText, is_primary: true, sort_order: 0, storage_provider: uploaded.storage_provider, storage_key: uploaded.storage_key, bucket_name: uploaded.bucket || "rumbo-images" }),
+    body: JSON.stringify({ url: uploaded.url, alt_text: altText, is_primary: isPrimary, sort_order: sortOrder, storage_provider: uploaded.storage_provider, storage_key: uploaded.storage_key, bucket_name: uploaded.bucket || "rumbo-images" }),
   });
-  const payload = (await response.json().catch(() => ({}))) as { message?: string };
+  const payload = (await response.json().catch(() => ({}))) as { image?: CatalogImage; message?: string };
   if (!response.ok) throw new Error(payload.message || "La imagen subió a Cloudflare, pero no pudimos asociarla al producto.");
+  return payload.image;
+}
+
+async function patchCatalogImage(productId: string, imageId: string, body: Record<string, unknown>) {
+  const response = await fetch(`/api/admin/catalog/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { image?: CatalogImage; message?: string };
+  if (!response.ok) throw new Error(payload.message || "No pudimos actualizar la imagen del catálogo.");
+  return payload.image;
 }
 
 export default function CatalogPanel() {
@@ -100,8 +121,10 @@ export default function CatalogPanel() {
   const [busyLabel, setBusyLabel] = useState("Creando…");
   const [newImage, setNewImage] = useState<File | null>(null);
   const [newImagePreview, setNewImagePreview] = useState("");
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [selectedImageBusy, setSelectedImageBusy] = useState(false);
+  const [selectedImageProgress, setSelectedImageProgress] = useState("");
+  const [selectedImageInputKey, setSelectedImageInputKey] = useState(0);
 
   async function load() {
     const response = await fetch("/api/admin/catalog", { cache: "no-store" });
@@ -152,7 +175,7 @@ export default function CatalogPanel() {
       if (newImage) {
         try {
           setBusyLabel("Subiendo imagen a Cloudflare…"); const uploaded = await uploadToCloudflare(newImage);
-          setBusyLabel("Asociando imagen al producto…"); await attachPrimaryImage(createdProduct.id, uploaded, String(form.get("image_alt") || createdProduct.name));
+          setBusyLabel("Asociando imagen al producto…"); await attachCatalogImage(createdProduct.id, uploaded, String(form.get("image_alt") || createdProduct.name), true, 0);
         } catch (imageError) {
           setOpen(false); chooseNewImage(null); formElement.reset(); const refreshed = await load(); setSelected(refreshed.find((item) => item.id === createdProduct?.id) || createdProduct);
           setError(`El producto ${createdProduct.name} sí fue creado, pero su imagen no quedó asociada: ${imageError instanceof Error ? imageError.message : "error de carga"}. Puedes reintentar abajo en la ficha del producto.`); return;
@@ -192,14 +215,62 @@ export default function CatalogPanel() {
   }
 
   async function uploadSelectedImage() {
-    if (!selected || !selectedImage) return;
+    if (!selected || !selectedImages.length) return;
+    setSelectedImageBusy(true); setError(""); setSuccess("");
+    let completed = 0;
+    try {
+      const existing = selected.images || [];
+      const existingCount = existing.length || (selected.image_url ? 1 : 0);
+      const nextSortOrder = Math.max(existingCount - 1, ...existing.map((image) => Number(image.sort_order) || 0)) + 1;
+      for (let index = 0; index < selectedImages.length; index += 1) {
+        setSelectedImageProgress(`Subiendo ${index + 1} de ${selectedImages.length}…`);
+        const uploaded = await uploadToCloudflare(selectedImages[index]);
+        await attachCatalogImage(selected.id, uploaded, `${selected.name} — foto ${existingCount + index + 1}`, existingCount === 0 && index === 0, nextSortOrder + index);
+        completed += 1;
+      }
+      const refreshed = await load(); setSelected(refreshed.find((item) => item.id === selected.id) || selected);
+      setSelectedImages([]); setSelectedImageInputKey((value) => value + 1);
+      setSuccess(`${completed} ${completed === 1 ? "foto agregada" : "fotos agregadas"} al carrusel de ${selected.name}.`);
+    } catch (uploadError) {
+      const refreshed = await load().catch(() => [] as Product[]); setSelected(refreshed.find((item) => item.id === selected.id) || selected);
+      setError(`${completed ? `${completed} ${completed === 1 ? "foto quedó guardada" : "fotos quedaron guardadas"}. ` : ""}${uploadError instanceof Error ? uploadError.message : "No pudimos actualizar las imágenes."}`);
+    }
+    finally { setSelectedImageBusy(false); setSelectedImageProgress(""); }
+  }
+
+  async function makePrimaryImage(image: CatalogImage) {
+    if (!selected || image.is_primary) return;
     setSelectedImageBusy(true); setError(""); setSuccess("");
     try {
-      const uploaded = await uploadToCloudflare(selectedImage); await attachPrimaryImage(selected.id, uploaded, selected.name);
-      const refreshed = await load(); setSelected(refreshed.find((item) => item.id === selected.id) || selected); setSelectedImage(null); setSuccess(`Imagen principal de ${selected.name} actualizada en Cloudflare R2.`);
-    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "No pudimos actualizar la imagen."); }
+      await patchCatalogImage(selected.id, image.id, { is_primary: true, sort_order: 0 });
+      const refreshed = await load(); setSelected(refreshed.find((item) => item.id === selected.id) || selected);
+      setSuccess("Portada actualizada. Esta será la primera foto del carrusel.");
+    } catch (imageError) { setError(imageError instanceof Error ? imageError.message : "No pudimos cambiar la portada."); }
     finally { setSelectedImageBusy(false); }
   }
+
+  async function moveImage(image: CatalogImage, direction: -1 | 1) {
+    if (!selected) return;
+    const secondaryImages = (selected.images || []).filter((item) => !item.is_primary);
+    const currentIndex = secondaryImages.findIndex((item) => item.id === image.id);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= secondaryImages.length) return;
+    const reordered = [...secondaryImages];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    setSelectedImageBusy(true); setError(""); setSuccess("");
+    try {
+      await Promise.all(reordered.map((item, index) => patchCatalogImage(selected.id, item.id, { sort_order: index + 1 })));
+      const refreshed = await load(); setSelected(refreshed.find((item) => item.id === selected.id) || selected);
+      setSuccess("Orden del carrusel actualizado.");
+    } catch (imageError) { setError(imageError instanceof Error ? imageError.message : "No pudimos reordenar las fotos."); }
+    finally { setSelectedImageBusy(false); }
+  }
+
+  const selectedGallery: CatalogImage[] = selected?.images?.length
+    ? selected.images
+    : selected?.image_url
+      ? [{ id: "", url: selected.image_url, alt_text: selected.name, sort_order: 0, is_primary: true }]
+      : [];
 
   return <div style={{ maxWidth: 1400, margin: "0 auto", color: "#17233b" }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "end", marginBottom: 14 }}>
@@ -218,7 +289,7 @@ export default function CatalogPanel() {
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#667085", marginBottom: 6 }}><span>{rows.length} productos encontrados</span><span>Página {page} de {pages}</span></div>
       <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}><thead><tr>{["Producto","Destino","Proveedor","Salidas","Precio desde","Costo","Margen","Cupos","Estado",""].map((heading,index) => <th key={`${heading}-${index}`} style={{...th,width:index===9?46:undefined}}>{heading}</th>)}</tr></thead><tbody>
-        {paged.map((productRow) => { const departure=productRow.departures?.[0],currency=departure?.currency||"USD",isSelected=selected?.id===productRow.id; return <tr key={productRow.id} onClick={() => { setSelected(productRow); setSelectedImage(null); }} style={{ cursor: "pointer", background: isSelected ? "#eef5fb" : "transparent" }}>
+        {paged.map((productRow) => { const departure=productRow.departures?.[0],currency=departure?.currency||"USD",isSelected=selected?.id===productRow.id; return <tr key={productRow.id} onClick={() => { setSelected(productRow); setSelectedImages([]); }} style={{ cursor: "pointer", background: isSelected ? "#eef5fb" : "transparent" }}>
           <td style={td}><div style={{ display:"flex",alignItems:"center",gap:8 }}>{productRow.image_url?<img src={productRow.image_url} alt="" style={{width:46,height:34,objectFit:"cover",borderRadius:6,border:"1px solid #e4e7ec"}}/>:<div style={{width:46,height:34,borderRadius:6,background:"#eef2f5",display:"grid",placeItems:"center",color:"#98a2b3",fontSize:9}}>Sin foto</div>}<span><b>{productRow.name}</b><small style={{display:"block",color:"#7d8796"}}>{productRow.slug}</small></span></div></td>
           <td style={td}>{[productRow.city,productRow.country,productRow.destination_iata].filter(Boolean).join(" · ")||"—"}</td><td style={td}>{productRow.provider||"Rumbo"}</td><td style={td}>{productRow.active_departure_count||0}</td><td style={td}>{money(productRow.from_price_amount??departure?.price_amount,currency)}</td><td style={td}>{money(departure?.cost_amount,currency)}</td><td style={td}>{departure?.margin_pct!=null?`${departure.margin_pct.toFixed(1)}%`:money(departure?.margin_amount,currency)}</td><td style={td}>{departure?.available_capacity??"—"}</td><td style={td}><span style={{padding:"4px 7px",borderRadius:999,background:"#eef3f7",fontWeight:800,fontSize:10}}>{statusLabel[productRow.status]||productRow.status}</span></td>
           <td style={{...td,textAlign:"center",padding:4}}>{isSelected?<button type="button" title="Editar producto" aria-label={`Editar ${productRow.name}`} onClick={(event)=>{event.stopPropagation();openEditor(productRow)}} style={{width:30,height:30,border:"1px solid #cfd8e3",borderRadius:7,background:"white",color:"#102b50",display:"grid",placeItems:"center",cursor:"pointer"}}><Pencil size={15}/></button>:null}</td>
@@ -230,9 +301,10 @@ export default function CatalogPanel() {
     <section style={{ background:"white",border:"1px solid #e4e7ec",borderRadius:12,padding:15,marginTop:14,minHeight:180 }}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
         <div><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:800,textTransform:"uppercase"}}>Producto y salidas</p><div style={{display:"flex",alignItems:"center",gap:9}}><h2 style={{margin:"4px 0"}}>{selected?selected.name:"Selecciona un producto"}</h2>{selected?<button type="button" onClick={()=>openEditor(selected)} style={{...secondary,padding:"6px 9px",display:"inline-flex",alignItems:"center",gap:6}}><Pencil size={14}/> Editar</button>:null}</div>{selected?<small style={{color:"#667085"}}>{selected.city||selected.country||"Sin destino"} · {selected.slug}</small>:null}</div>
-        {selected?<div style={{display:"flex",alignItems:"center",gap:10,padding:9,border:"1px solid #e4e7ec",borderRadius:10,minWidth:390}}>{selected.image_url?<img src={selected.image_url} alt={selected.name} style={{width:72,height:52,objectFit:"cover",borderRadius:7}}/>:<div style={{width:72,height:52,borderRadius:7,background:"#eef2f5",display:"grid",placeItems:"center",color:"#98a2b3",fontSize:10}}>Sin imagen</div>}<div style={{flex:1,display:"grid",gap:5}}><strong style={{fontSize:12}}>Imagen principal · Cloudflare R2</strong><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event)=>setSelectedImage(event.target.files?.[0]||null)} style={{fontSize:11}}/><small style={{color:"#667085"}}>JPG, PNG, WebP o GIF · máximo 10 MB.</small></div><button type="button" style={{...secondary,opacity:!selectedImage||selectedImageBusy?.55:1}} disabled={!selectedImage||selectedImageBusy} onClick={()=>void uploadSelectedImage()}>{selectedImageBusy?"Subiendo…":selected.image_url?"Reemplazar":"Agregar"}</button></div>:null}
+        {selected?<div style={{display:"flex",alignItems:"center",gap:10,padding:10,border:"1px solid #d8e0e8",borderRadius:10,minWidth:430,background:"#f8fafc"}}><ImagePlus size={22} color="#102b50"/><div style={{flex:1,display:"grid",gap:5}}><strong style={{fontSize:12}}>Agregar fotos al carrusel · Cloudflare R2</strong><input key={selectedImageInputKey} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event)=>setSelectedImages(Array.from(event.target.files||[]))} style={{fontSize:11}}/><small style={{color:"#667085"}}>{selectedImages.length?`${selectedImages.length} ${selectedImages.length===1?"foto seleccionada":"fotos seleccionadas"}`:"Recomendado: 1600 × 900 px · JPG o WebP · máximo 10 MB por foto."}</small></div><button type="button" style={{...secondary,opacity:!selectedImages.length||selectedImageBusy?.55:1,whiteSpace:"nowrap"}} disabled={!selectedImages.length||selectedImageBusy} onClick={()=>void uploadSelectedImage()}>{selectedImageBusy?(selectedImageProgress||"Guardando…"):`Subir ${selectedImages.length||"fotos"}`}</button></div>:null}
       </div>
-      {selected?<div style={{overflowX:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr>{["Origen","Salida","Retorno","Precio","Costo","Margen","Capacidad","Disponibles","Estado"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead><tbody>{(selected.departures||[]).map(departure=><tr key={departure.id}><td style={td}>{departure.origin_iata||"—"}</td><td style={td}>{departure.departure_date||"—"}</td><td style={td}>{departure.return_date||"—"}</td><td style={td}>{money(departure.price_amount,departure.currency)}</td><td style={td}>{money(departure.cost_amount,departure.currency)}</td><td style={td}>{departure.margin_pct!=null?`${departure.margin_pct.toFixed(1)}%`:money(departure.margin_amount,departure.currency)}</td><td style={td}>{departure.capacity??"—"}</td><td style={td}>{departure.available_capacity??"—"}</td><td style={td}>{departure.status}</td></tr>)}</tbody></table>{!(selected.departures||[]).length?<p style={{color:"#667085"}}>Este producto todavía no tiene salidas.</p>:null}</div>:<p style={{color:"#667085"}}>Haz clic en una fila para ver sus salidas, disponibilidad e imagen principal.</p>}
+      {selected?<div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #edf0f3"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,marginBottom:9}}><div><strong style={{fontSize:13}}>Galería del paquete</strong><small style={{display:"block",marginTop:3,color:"#667085"}}>La portada aparece primero; las demás siguen el orden indicado.</small></div><span style={{fontSize:11,color:"#667085"}}>{selectedGallery.length} {selectedGallery.length===1?"foto":"fotos"}</span></div>{selectedGallery.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10}}>{selectedGallery.map((image,index)=>{const secondary=selectedGallery.filter(item=>!item.is_primary),secondaryIndex=secondary.findIndex(item=>item.id===image.id);return <article key={image.id||image.url} style={{border:image.is_primary?"2px solid #102b50":"1px solid #dfe5eb",borderRadius:11,overflow:"hidden",background:"#fff"}}><div style={{height:112,position:"relative",background:"#eef2f5"}}><img src={image.url} alt={image.alt_text||`${selected.name} — foto ${index+1}`} style={{width:"100%",height:"100%",objectFit:"cover"}}/><span style={{position:"absolute",left:8,top:8,padding:"4px 7px",borderRadius:999,background:image.is_primary?"#102b50":"rgba(255,255,255,.94)",color:image.is_primary?"#fff":"#102b50",fontSize:9,fontWeight:850}}>{image.is_primary?"Portada":`Foto ${index+1}`}</span></div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,padding:7}}>{!image.is_primary&&image.id?<button type="button" disabled={selectedImageBusy} onClick={()=>void makePrimaryImage(image)} style={{...secondary,padding:"5px 7px",fontSize:9,display:"inline-flex",alignItems:"center",gap:4}}><Star size={12}/> Usar de portada</button>:<span style={{fontSize:9,color:"#667085"}}>Imagen principal</span>} {!image.is_primary&&image.id?<span style={{display:"flex",gap:4}}><button type="button" title="Mover antes" aria-label={`Mover foto ${index+1} antes`} disabled={selectedImageBusy||secondaryIndex<=0} onClick={()=>void moveImage(image,-1)} style={{...secondary,padding:4,display:"grid",placeItems:"center"}}><ChevronLeft size={13}/></button><button type="button" title="Mover después" aria-label={`Mover foto ${index+1} después`} disabled={selectedImageBusy||secondaryIndex<0||secondaryIndex>=secondary.length-1} onClick={()=>void moveImage(image,1)} style={{...secondary,padding:4,display:"grid",placeItems:"center"}}><ChevronRight size={13}/></button></span>:null}</div></article>})}</div>:<div style={{padding:18,border:"1px dashed #b8c3d1",borderRadius:10,color:"#667085",fontSize:12,textAlign:"center"}}>Todavía no hay fotos. Sube de 5 a 8 para que el carrusel luzca como una vitrina de viajes.</div>}</div>:null}
+      {selected?<div style={{overflowX:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr>{["Origen","Salida","Retorno","Precio","Costo","Margen","Capacidad","Disponibles","Estado"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead><tbody>{(selected.departures||[]).map(departure=><tr key={departure.id}><td style={td}>{departure.origin_iata||"—"}</td><td style={td}>{departure.departure_date||"—"}</td><td style={td}>{departure.return_date||"—"}</td><td style={td}>{money(departure.price_amount,departure.currency)}</td><td style={td}>{money(departure.cost_amount,departure.currency)}</td><td style={td}>{departure.margin_pct!=null?`${departure.margin_pct.toFixed(1)}%`:money(departure.margin_amount,departure.currency)}</td><td style={td}>{departure.capacity??"—"}</td><td style={td}>{departure.available_capacity??"—"}</td><td style={td}>{departure.status}</td></tr>)}</tbody></table>{!(selected.departures||[]).length?<p style={{color:"#667085"}}>Este producto todavía no tiene salidas.</p>:null}</div>:<p style={{color:"#667085"}}>Haz clic en una fila para ver sus salidas, disponibilidad y galería.</p>}
     </section>
 
     {open?<div onMouseDown={(event)=>{if(event.target===event.currentTarget&&!busy)setOpen(false)}} style={overlay}><form onSubmit={create} onMouseDown={(event)=>event.stopPropagation()} style={modal}><button type="button" disabled={busy} onClick={()=>setOpen(false)} style={closeButton}>×</button><p style={{margin:0,color:"#e9573b",fontSize:10,fontWeight:800,textTransform:"uppercase"}}>Catálogo</p><h2 style={{margin:"4px 0"}}>Nuevo producto</h2><p style={{color:"#667085",marginTop:0}}>El producto queda en PostgreSQL y la imagen se almacena en Cloudflare R2.</p><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}><L n="name" t="Nombre" req/><L n="slug" t="Código / slug" req/><label style={label}>País<input name="country" placeholder="Panamá" style={field}/><small style={{color:"#98a2b3"}}>Rumbo deriva automáticamente región y subregión desde el país.</small></label><L n="city" t="Ciudad"/><L n="destination_iata" t="IATA destino"/><L n="provider" t="Proveedor" dv="Rumbo"/><L n="duration_label" t="Duración"/><L n="tag" t="Etiqueta comercial"/><label style={label}>Estado<select name="status" defaultValue="draft" style={field}><option value="draft">Borrador</option><option value="published">Publicado</option><option value="archived">Archivado</option></select></label><label style={{...label,gridColumn:"1/-1"}}>Descripción<textarea name="description" rows={3} style={{...field,resize:"vertical"}}/></label><label style={{...label,gridColumn:"1/-1"}}>Incluye · un concepto por línea<textarea name="included" rows={3} placeholder={"Vuelo ida y vuelta\nHotel\nTraslados"} style={{...field,resize:"vertical"}}/></label><div style={{gridColumn:"1/-1",borderTop:"1px solid #e4e7ec",paddingTop:12}}><strong style={{fontSize:12}}>Imagen principal · Cloudflare R2</strong><div style={{display:"grid",gridTemplateColumns:newImagePreview?"150px 1fr":"1fr",gap:12,marginTop:8,alignItems:"center"}}>{newImagePreview?<img src={newImagePreview} alt="Vista previa" style={{width:150,height:96,borderRadius:9,objectFit:"cover",border:"1px solid #e4e7ec"}}/>:null}<div style={{border:"1px dashed #aeb9c7",borderRadius:10,padding:14,background:"#f8fafc"}}><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event)=>chooseNewImage(event.target.files?.[0]||null)}/><small style={{display:"block",color:"#667085",marginTop:5}}>JPG, PNG, WebP o GIF · máximo 10 MB.</small></div></div></div><L n="image_alt" t="Texto alternativo de la imagen"/><div style={{gridColumn:"1/-1",borderTop:"1px solid #e4e7ec",paddingTop:12}}><strong style={{fontSize:12}}>Primera salida · opcional</strong></div><L n="origin_iata" t="IATA origen"/><L n="departure_date" t="Fecha salida" type="date"/><L n="return_date" t="Fecha retorno" type="date"/><label style={label}>Moneda<select name="currency" defaultValue="USD" style={field}><option>USD</option><option>PEN</option><option>EUR</option><option>GBP</option></select></label><L n="price_amount" t="Precio base" type="number" step="0.01"/><L n="cost_amount" t="Costo" type="number" step="0.01"/><L n="capacity" t="Capacidad" type="number"/><L n="low_stock_threshold" t="Alerta de pocos cupos" type="number" dv="5"/></div><button disabled={busy} style={{...primary,marginTop:14,opacity:busy?.7:1}}>{busy?busyLabel:"Crear producto"}</button></form></div>:null}

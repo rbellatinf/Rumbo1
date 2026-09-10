@@ -1,8 +1,17 @@
+export type TravelPackageImage = {
+  id?: string;
+  url: string;
+  alt?: string;
+  sortOrder?: number;
+  isPrimary?: boolean;
+};
+
 export type TravelPackage = {
   id: string;
   destination: string;
   country: string;
   image: string;
+  images?: TravelPackageImage[];
   imagePosition: string;
   duration: string;
   rating: string;

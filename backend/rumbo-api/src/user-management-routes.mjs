@@ -54,6 +54,23 @@ export function installUserManagementRoutes(app,{pool,requireAdmin,audit}){
     }finally{client.release()}
   });
 
+  app.patch('/api/admin/catalog/:id/images/:imageId',requireAdmin,async(req,res)=>{
+    const makePrimary=req.body.is_primary===true,hasAlt=Object.prototype.hasOwnProperty.call(req.body,'alt_text'),hasSort=Number.isFinite(Number(req.body.sort_order)),client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const current=(await client.query(`SELECT id FROM rumbo_catalog_images WHERE id=$1 AND product_id=$2 FOR UPDATE`,[req.params.imageId,req.params.id])).rows[0];
+      if(!current){await client.query('ROLLBACK');return res.status(404).json({error:{message:'Imagen no encontrada en este producto.'}})}
+      if(makePrimary)await client.query(`UPDATE rumbo_catalog_images SET is_primary=false WHERE product_id=$1`,[req.params.id]);
+      const {rows}=await client.query(`UPDATE rumbo_catalog_images SET alt_text=CASE WHEN $3 THEN $4 ELSE alt_text END,sort_order=CASE WHEN $5 THEN $6 ELSE sort_order END,is_primary=CASE WHEN $7 THEN true ELSE is_primary END WHERE id=$1 AND product_id=$2 RETURNING *`,[req.params.imageId,req.params.id,hasAlt,hasAlt?clean(req.body.alt_text)||null:null,hasSort,hasSort?Number(req.body.sort_order):0,makePrimary]);
+      await client.query('COMMIT');
+      await audit(req.adminSession.email,'catalog.image_updated','catalog_product',req.params.id,{image_id:req.params.imageId,is_primary:makePrimary,sort_order:hasSort?Number(req.body.sort_order):undefined});
+      return res.json({image:rows[0]});
+    }catch(e){
+      await client.query('ROLLBACK').catch(()=>{});
+      console.error(e);return res.status(500).json({error:{message:'No pudimos actualizar la imagen.'}});
+    }finally{client.release()}
+  });
+
   app.get('/api/admin/internal-users',requireAdmin,async(_req,res)=>{
     const {rows}=await pool.query(`SELECT * FROM rumbo_internal_user_summary ORDER BY CASE WHEN internal_role='admin' THEN 0 ELSE 1 END,first_name,last_name`);
     res.json({users:rows});

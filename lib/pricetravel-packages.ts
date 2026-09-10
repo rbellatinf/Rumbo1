@@ -1,5 +1,5 @@
 import { fetchRumboProvider, parseProviderJson, providerMessage, rumboProvider } from "./rumbo-provider-client.ts";
-import type { TravelPackage } from "./travel-packages.ts";
+import type { TravelPackage, TravelPackageImage } from "./travel-packages.ts";
 
 export type PackageSearchInput={originIata:string;destinationIata:string;destinationName:string;departureDate:string;returnDate:string;adults:number;currency:string};
 export type PackageSearchResult={mode:"live";provider:"PriceTravel";packages:TravelPackage[];message:string};
@@ -9,6 +9,26 @@ const row=(value:unknown):Row|null=>value&&typeof value==="object"&&!Array.isArr
 const text=(source:Row,names:string[])=>{for(const name of names){const value=source[name];if(typeof value==="string"&&value.trim())return value.trim()}return undefined};
 const number=(source:Row,names:string[])=>{for(const name of names){const value=source[name],parsed=Number(value);if(value!==null&&value!==""&&Number.isFinite(parsed))return parsed}return undefined};
 function items(payload:unknown){if(Array.isArray(payload))return payload;const source=row(payload);if(!source)return[];for(const key of["Packages","packages","Results","results","Data","data"])if(Array.isArray(source[key]))return source[key] as unknown[];return[]}
-function mapPackage(value:unknown,index:number,input:PackageSearchInput):TravelPackage|null{const source=row(value);if(!source)return null;const currency=text(source,["Currency","currency","CurrencyCode","currencyCode"])||input.currency,amount=number(source,["TotalAmount","totalAmount","TotalPrice","totalPrice","Price","price"]),rawIncluded=source.Services??source.services??source.Included??source.included,included=Array.isArray(rawIncluded)?rawIncluded.map(value=>typeof value==="string"?value:text(row(value)||{},["Name","name","Description","description"])).filter((value):value is string=>Boolean(value)).slice(0,5):[];return{id:text(source,["PackageId","packageId","Id","id","Code","code"])||`pricetravel-${index+1}`,destination:text(source,["PackageName","packageName","Name","name","Title","title"])||`Paquete a ${input.destinationName}`,country:text(source,["CountryName","countryName","Country","country"])||"Destino internacional",image:text(source,["ImageUrl","imageUrl","Image","image"])||"/images/rumbo-hero.jpg",imagePosition:"center",duration:`${number(source,["Nights","nights","NumberOfNights","numberOfNights"])||1} noches`,rating:text(source,["Rating","rating","Stars","stars"])||"Nuevo",reviews:text(source,["Reviews","reviews"])||"0",price:amount===undefined?"Consultar":new Intl.NumberFormat("es-PE",{style:"currency",currency,maximumFractionDigits:0}).format(amount),previousPrice:"",tag:"PriceTravel",included,provider:"PriceTravel",providerReference:text(source,["PackageId","packageId","Id","id","Code","code"])||`pricetravel-${index+1}`,bookable:false}}
+function packageImages(source:Row,fallback:string,destination:string):TravelPackageImage[]{
+  const raw=source.Images??source.images??source.Gallery??source.gallery??source.Photos??source.photos;
+  const values=Array.isArray(raw)?raw:[];
+  const seen=new Set<string>();
+  const images=values.flatMap((value,imageIndex)=>{
+    const image=typeof value==="string"?{url:value}:row(value);
+    if(!image)return[];
+    const url=text(image,["Url","url","ImageUrl","imageUrl","LargeUrl","largeUrl"]);
+    if(!url||seen.has(url))return[];
+    seen.add(url);
+    return [{url,alt:text(image,["Alt","alt","Description","description","Title","title"])||`${destination} — foto ${imageIndex+1}`,sortOrder:imageIndex,isPrimary:imageIndex===0}];
+  });
+  return images.length?images:[{url:fallback,alt:destination,isPrimary:true,sortOrder:0}];
+}
+function mapPackage(value:unknown,index:number,input:PackageSearchInput):TravelPackage|null{
+  const source=row(value);if(!source)return null;
+  const currency=text(source,["Currency","currency","CurrencyCode","currencyCode"])||input.currency,amount=number(source,["TotalAmount","totalAmount","TotalPrice","totalPrice","Price","price"]),rawIncluded=source.Services??source.services??source.Included??source.included,included=Array.isArray(rawIncluded)?rawIncluded.map(value=>typeof value==="string"?value:text(row(value)||{},["Name","name","Description","description"])).filter((value):value is string=>Boolean(value)).slice(0,5):[];
+  const destination=text(source,["PackageName","packageName","Name","name","Title","title"])||`Paquete a ${input.destinationName}`;
+  const image=text(source,["ImageUrl","imageUrl","Image","image"])||"/images/rumbo-hero.jpg";
+  return{id:text(source,["PackageId","packageId","Id","id","Code","code"])||`pricetravel-${index+1}`,destination,country:text(source,["CountryName","countryName","Country","country"])||"Destino internacional",image,images:packageImages(source,image,destination),imagePosition:"center",duration:`${number(source,["Nights","nights","NumberOfNights","numberOfNights"])||1} noches`,rating:text(source,["Rating","rating","Stars","stars"])||"Nuevo",reviews:text(source,["Reviews","reviews"])||"0",price:amount===undefined?"Consultar":new Intl.NumberFormat("es-PE",{style:"currency",currency,maximumFractionDigits:0}).format(amount),previousPrice:"",tag:"PriceTravel",included,provider:"PriceTravel",providerReference:text(source,["PackageId","packageId","Id","id","Code","code"])||`pricetravel-${index+1}`,bookable:false};
+}
 
 export async function searchPriceTravelPackages(input:PackageSearchInput):Promise<PackageSearchResult>{const provider=rumboProvider();if(!provider.apiUrl)throw new PriceTravelError("Rumbo API no está configurada para consultar PriceTravel.",503);const query=new URLSearchParams({origin:input.originIata,destination:input.destinationIata,destinationName:input.destinationName,departureDate:input.departureDate,returnDate:input.returnDate,adults:String(input.adults),currency:input.currency});let response:Response;try{response=await fetchRumboProvider(`${provider.apiUrl}/api/integrations/pricetravel/packages?${query}`,{headers:provider.headers,cache:"no-store"})}catch(error){throw new PriceTravelError(error instanceof Error?`No se pudo conectar con PriceTravel: ${error.message}`:"No se pudo conectar con PriceTravel.")}const payload=await parseProviderJson(response);if(!response.ok)throw new PriceTravelError(providerMessage(payload,`PriceTravel respondió HTTP ${response.status}.`),response.status);const packages=items(payload).map((item,index)=>mapPackage(item,index,input)).filter((item):item is TravelPackage=>Boolean(item)).slice(0,24);return{mode:"live",provider:"PriceTravel",packages,message:packages.length?"Paquetes y tarifas consultados directamente en PriceTravel.":"PriceTravel respondió correctamente, pero no encontró paquetes para estas fechas."}}

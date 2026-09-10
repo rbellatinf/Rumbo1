@@ -75,13 +75,24 @@ const departurePublicJson = `jsonb_build_object(
   'sale_open',CASE WHEN x.sale_deadline IS NULL OR x.sale_deadline>=now() THEN true ELSE false END
 )`;
 
+const catalogImagesJoin = `LEFT JOIN LATERAL (
+  SELECT
+    (array_agg(ci.url ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at))[1] AS image_url,
+    (array_agg(ci.alt_text ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at))[1] AS alt_text,
+    COALESCE(jsonb_agg(jsonb_build_object(
+      'id',ci.id,'url',ci.url,'alt_text',ci.alt_text,'sort_order',ci.sort_order,'is_primary',ci.is_primary
+    ) ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at),'[]'::jsonb) AS images
+  FROM rumbo_catalog_images ci
+  WHERE ci.product_id=p.id
+) image_gallery ON true`;
+
 const catalogSelect = `
 SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.destination_iata,
        p.product_type,p.provider,p.provider_reference,p.duration_label,p.tag,p.included,p.status,p.featured,p.sort_order,
        d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.capacity,d.available_capacity,d.low_stock_threshold,
        d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,d.confirmation_mode,d.minimum_group_size,
        stats.from_price_amount,stats.active_departure_count,stats.departures,
-       i.url AS image_url,i.alt_text
+       image_gallery.image_url,image_gallery.alt_text,image_gallery.images
 FROM rumbo_catalog_products p
 LEFT JOIN LATERAL (
   SELECT * FROM rumbo_catalog_departures d
@@ -97,9 +108,7 @@ LEFT JOIN LATERAL (
    WHERE x.product_id=p.id AND x.status='active' AND (x.departure_date IS NULL OR x.departure_date>=current_date)
      AND (x.sale_deadline IS NULL OR x.sale_deadline>=now())
 ) stats ON true
-LEFT JOIN LATERAL (
-  SELECT * FROM rumbo_catalog_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.created_at LIMIT 1
-) i ON true`;
+${catalogImagesJoin}`;
 
 app.get("/api/catalog", async (req, res) => {
   const destination = clean(req.query.destination).toUpperCase();
@@ -189,7 +198,7 @@ SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.d
        d.capacity,d.available_capacity,d.low_stock_threshold,d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,
        d.confirmation_mode,d.minimum_group_size,
        stats.from_price_amount,stats.active_departure_count,stats.departures,
-       i.url AS image_url,i.alt_text
+       image_gallery.image_url,image_gallery.alt_text,image_gallery.images
 FROM rumbo_catalog_products p
 LEFT JOIN LATERAL (
   SELECT * FROM rumbo_catalog_departures d WHERE d.product_id=p.id AND d.status='active' ORDER BY d.departure_date NULLS LAST,d.price_amount LIMIT 1
@@ -207,7 +216,7 @@ LEFT JOIN LATERAL (
          ) ORDER BY (x.price_amount-COALESCE(x.cost_amount,x.price_amount)) DESC,x.departure_date NULLS LAST),'[]'::jsonb) AS departures
     FROM rumbo_catalog_departures x WHERE x.product_id=p.id AND x.status='active'
 ) stats ON true
-LEFT JOIN LATERAL (SELECT * FROM rumbo_catalog_images i WHERE i.product_id=p.id ORDER BY i.is_primary DESC,i.sort_order,i.created_at LIMIT 1) i ON true`;
+${catalogImagesJoin}`;
 
 app.get("/api/admin/catalog", requireAdmin, async (req, res) => {
   const sort = clean(req.query.sort);

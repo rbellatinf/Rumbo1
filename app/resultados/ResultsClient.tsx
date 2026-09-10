@@ -21,6 +21,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { TravelPackage } from "../../lib/travel-packages";
+import PackageImageCarousel from "../components/PackageImageCarousel";
 import styles from "./results.module.css";
 
 type SortMode="recommended"|"price-asc"|"price-desc"|"rating-desc";
@@ -210,7 +211,7 @@ export default function ResultsClient(){
       </section>
     </section>
 
-    {selected?<div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-label={`Detalle de ${selected.destination}`} onMouseDown={e=>{if(e.target===e.currentTarget)setSelected(null)}}><article className={styles.modal}><button className={styles.modalClose} type="button" onClick={()=>setSelected(null)}><X/></button><img src={selected.image} alt=""/><div><span className={styles.modalTag}>{selected.tag}</span><h2>{selected.destination}</h2><p>{selected.country} · {selected.duration}</p><div className={styles.modalFacts}><span><CalendarDays/>{dateLabel(selected.departureDate)} – {dateLabel(selected.returnDate)}</span><span><Users/>{typeof selected.capacity==="number"?`${selected.capacity} cupos disponibles`:"Consultar disponibilidad"}</span><span><Package/>{providerLabel(selected)}</span></div><h3>Incluye</h3><ul>{(selected.included||[]).map(value=><li key={value}><Check/>{value}</li>)}</ul><div className={styles.modalPrice}><span>Precio por persona</span><strong>{selected.price}</strong></div><p className={styles.modalNote}>La selección y el pago se conectarán al mismo flujo de reserva nativo de Rumbo; esta pantalla no inventa disponibilidad adicional.</p></div></article></div>:null}
+    {selected?<div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-label={`Detalle de ${selected.destination}`} onMouseDown={e=>{if(e.target===e.currentTarget)setSelected(null)}}><article className={styles.modal}><button className={styles.modalClose} type="button" onClick={()=>setSelected(null)}><X/></button><PackageImageCarousel className={styles.modalCarousel} images={selected.images} fallbackSrc={selected.image} alt={selected.destination} imagePosition={selected.imagePosition} shade eager/><div><span className={styles.modalTag}>{selected.tag}</span><h2>{selected.destination}</h2><p>{selected.country} · {selected.duration}</p><div className={styles.modalFacts}><span><CalendarDays/>{dateLabel(selected.departureDate)} – {dateLabel(selected.returnDate)}</span><span><Users/>{typeof selected.capacity==="number"?`${selected.capacity} cupos disponibles`:"Consultar disponibilidad"}</span><span><Package/>{providerLabel(selected)}</span></div><h3>Incluye</h3><ul>{(selected.included||[]).map(value=><li key={value}><Check/>{value}</li>)}</ul><div className={styles.modalPrice}><span>Precio por persona</span><strong>{selected.price}</strong></div><p className={styles.modalNote}>La selección y el pago se conectarán al mismo flujo de reserva nativo de Rumbo; esta pantalla no inventa disponibilidad adicional.</p></div></article></div>:null}
   </main>;
 }
 
@@ -220,7 +221,7 @@ function RadioRow({name,checked,onChange,label}:{name:string;checked:boolean;onC
 function ResultCard({item,onOpen}:{item:TravelPackage;onOpen:()=>void}){
   const rating=numericRating(item);
   return <article className={styles.card}>
-    <div className={styles.imageWrap}><img src={item.image} alt=""/><span>{item.tag}</span><button type="button" aria-label={`Guardar ${item.destination}`}><Heart/></button></div>
+    <div className={styles.imageWrap}><PackageImageCarousel images={item.images} fallbackSrc={item.image} alt={item.destination} imagePosition={item.imagePosition} fill shade/><span>{item.tag}</span><button type="button" aria-label={`Guardar ${item.destination}`}><Heart/></button></div>
     <div className={styles.cardBody}><div className={styles.cardTop}><div><small>{item.country} · {providerLabel(item)}</small><h2>{item.destination}</h2></div>{rating!=null?<span className={styles.rating}><Star/>{rating.toFixed(1)}</span>:null}</div><p className={styles.duration}><Clock3/>{item.duration}{item.departureDate?` · ${dateLabel(item.departureDate)}`:""}</p><ul>{(item.included||[]).slice(0,3).map(value=><li key={value}><Check/>{value}</li>)}</ul>{item.lowStock?<p className={styles.lowStock}>Quedan pocos cupos</p>:null}</div>
     <div className={styles.cardPrice}><small>Precio por persona</small>{item.previousPrice?<s>{item.previousPrice}</s>:null}<strong>{item.price}</strong><span>{item.bookable?"Disponible para reservar":"Consulta condiciones"}</span><button type="button" onClick={onOpen}>Ver detalle</button></div>
   </article>;
