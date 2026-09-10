@@ -1,4 +1,4 @@
-name: Verify live Rumbo API
+name: Verify live Rumbo platform
 
 on:
   push:
@@ -9,24 +9,27 @@ permissions:
   contents: read
 
 jobs:
-  health:
+  live-platform:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - name: Check deployed API health
+      - name: Check deployed API and storefront catalog
         shell: bash
         run: |
           set -u
-          endpoint="https://rumbo-api-4twt.onrender.com/health"
+          health_endpoint="https://rumbo-api-4twt.onrender.com/health"
           for attempt in $(seq 1 9); do
-            code=$(curl --silent --show-error --max-time 10 --output /tmp/rumbo-health.txt --write-out '%{http_code}' "$endpoint" || true)
+            code=$(curl --silent --show-error --max-time 10 --output /tmp/rumbo-health.txt --write-out '%{http_code}' "$health_endpoint" || true)
             body=$(head -c 400 /tmp/rumbo-health.txt 2>/dev/null || true)
-            echo "ATTEMPT=$attempt HTTP=$code BODY=$body"
+            echo "HEALTH_ATTEMPT=$attempt HTTP=$code BODY=$body"
             if [ "$code" = "200" ]; then
-              echo "RESULT=healthy"
-              exit 0
+              echo "API_RESULT=healthy"
+              break
             fi
             sleep 10
           done
-          echo "RESULT=unhealthy"
-          exit 0
+
+          catalog_endpoint="https://rumbo-storefront.onrender.com/api/catalog"
+          catalog_code=$(curl --silent --show-error --max-time 150 --output /tmp/rumbo-catalog.json --write-out '%{http_code}' "$catalog_endpoint" || true)
+          echo "CATALOG_HTTP=$catalog_code"
+          node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync("/tmp/rumbo-catalog.json","utf8")); const packages=Array.isArray(p.packages)?p.packages:[]; console.log("CATALOG_RESULT="+JSON.stringify({mode:p.mode,count:packages.length,message:p.message,withMultipleImages:packages.filter(x=>Array.isArray(x.images)&&x.images.length>1).length})); } catch (error) { console.log("CATALOG_RESULT="+JSON.stringify({error:error.message})); }'
