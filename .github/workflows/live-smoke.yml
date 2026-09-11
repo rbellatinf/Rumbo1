@@ -1,0 +1,60 @@
+name: Verify live Rumbo platform
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/live-smoke.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  live-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check Rumbo API health
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://rumbo-api-4twt.onrender.com/health"
+          code="000"
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error --max-time 12 --output /tmp/rumbo-health.txt --write-out '%{http_code}' "$endpoint" || true)
+            body=$(head -c 600 /tmp/rumbo-health.txt 2>/dev/null || true)
+            echo "HEALTH_ATTEMPT=$attempt HTTP=$code BODY=$body"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Rumbo API health failed after retries; last HTTP=$code"
+          exit 1
+
+      - name: Check storefront catalog API
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://rumbo-storefront.onrender.com/api/catalog"
+          code=$(curl --silent --show-error --max-time 150 --output /tmp/rumbo-catalog.json --write-out '%{http_code}' "$endpoint" || true)
+          body=$(head -c 800 /tmp/rumbo-catalog.json 2>/dev/null || true)
+          echo "CATALOG_HTTP=$code BODY=$body"
+          if [ "$code" != "200" ]; then
+            echo "Storefront catalog endpoint failed; HTTP=$code"
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const raw = fs.readFileSync('/tmp/rumbo-catalog.json', 'utf8');
+          const payload = JSON.parse(raw);
+          const packages = Array.isArray(payload.packages) ? payload.packages : [];
+          console.log('CATALOG_RESULT=' + JSON.stringify({
+            mode: payload.mode,
+            count: packages.length,
+            message: payload.message,
+            withImageArrays: packages.filter(x => Array.isArray(x.images)).length,
+            withMultipleImages: packages.filter(x => Array.isArray(x.images) && x.images.length > 1).length
+          }));
+          if (!Array.isArray(payload.packages)) process.exit(2);
+          NODE
