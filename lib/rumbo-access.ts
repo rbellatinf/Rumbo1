@@ -47,13 +47,27 @@ export function providerHeaders(
   return headers;
 }
 
-const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-const COLD_START_DELAYS=[900,1800,3200,5000,7000,9000,12000];
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const COLD_START_DELAYS = [900, 1800, 3200, 5000, 7000, 9000, 12000];
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
+
+function retryAfterMs(response: Response) {
+  const raw = response.headers.get("retry-after")?.trim();
+  if (!raw) return 0;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30000);
+
+  const retryAt = Date.parse(raw);
+  if (!Number.isNaN(retryAt)) return Math.min(Math.max(retryAt - Date.now(), 0), 30000);
+
+  return 0;
+}
 
 /**
  * Server-side fetch for the Render-hosted Rumbo API.
- * Retries only transient infrastructure responses/network errors so a cold start
- * does not make the storefront look as if the catalog or integrations vanished.
+ * Retries transient infrastructure responses, including Render rate limits,
+ * so cold starts do not make the storefront look as if the catalog vanished.
  */
 export async function fetchRumboApi(
   provider: AccessProvider,
@@ -61,26 +75,40 @@ export async function fetchRumboApi(
   init: RequestInit = {},
   options: { attempts?: number; timeoutMs?: number } = {},
 ) {
-  const attempts=Math.max(1,options.attempts??8),timeoutMs=Math.max(1000,options.timeoutMs??15000);
-  let lastError:unknown;
-  for(let attempt=0;attempt<attempts;attempt+=1){
-    try{
-      const headers=new Headers(init.headers);
-      for(const [key,value] of Object.entries(providerHeaders(provider)))if(!headers.has(key))headers.set(key,value);
-      const response=await fetch(`${provider.apiUrl}${path}`,{
+  const attempts = Math.max(1, options.attempts ?? 8);
+  const timeoutMs = Math.max(1000, options.timeoutMs ?? 15000);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const headers = new Headers(init.headers);
+      for (const [key, value] of Object.entries(providerHeaders(provider))) {
+        if (!headers.has(key)) headers.set(key, value);
+      }
+
+      const response = await fetch(`${provider.apiUrl}${path}`, {
         ...init,
         headers,
-        cache:init.cache??"no-store",
-        signal:init.signal??AbortSignal.timeout(timeoutMs),
+        cache: init.cache ?? "no-store",
+        signal: init.signal ?? AbortSignal.timeout(timeoutMs),
       });
-      if(![502,503,504].includes(response.status)||attempt===attempts-1)return response;
-    }catch(error){
-      lastError=error;
-      if(attempt===attempts-1)throw error;
+
+      if (!TRANSIENT_STATUSES.has(response.status) || attempt === attempts - 1) return response;
+
+      const baseDelay = COLD_START_DELAYS[Math.min(attempt, COLD_START_DELAYS.length - 1)];
+      const delay = response.status === 429 ? Math.max(baseDelay, retryAfterMs(response)) : baseDelay;
+      await response.body?.cancel().catch(() => undefined);
+      await sleep(delay);
+      continue;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) throw error;
     }
-    await sleep(COLD_START_DELAYS[Math.min(attempt,COLD_START_DELAYS.length-1)]);
+
+    await sleep(COLD_START_DELAYS[Math.min(attempt, COLD_START_DELAYS.length - 1)]);
   }
-  throw lastError instanceof Error?lastError:new Error("Rumbo API no respondió.");
+
+  throw lastError instanceof Error ? lastError : new Error("Rumbo API no respondió.");
 }
 
 function upstreamTextMessage(text: string, status: number) {
