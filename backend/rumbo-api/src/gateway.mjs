@@ -66,13 +66,31 @@ app.get("/api/referrals/:code", async (req, res) => {
 });
 
 const departurePublicJson = `jsonb_build_object(
-  'id',x.id,'origin_iata',x.origin_iata,'departure_date',x.departure_date,'return_date',x.return_date,
-  'currency',x.currency,'price_amount',x.price_amount::float8,'capacity',x.capacity,'available_capacity',x.available_capacity,
-  'low_stock_threshold',x.low_stock_threshold,'status',x.status,'sale_deadline',x.sale_deadline,
-  'min_passengers_per_booking',x.min_passengers_per_booking,'max_passengers_per_booking',x.max_passengers_per_booking,
-  'confirmation_mode',x.confirmation_mode,'minimum_group_size',x.minimum_group_size,
+  'id',x.id,
+  'origin_iata',x.origin_iata,
+  'departure_date',x.departure_date,
+  'return_date',x.return_date,
+  'currency',x.currency,
+  'price_amount',x.price_amount::float8,
+  'taxes_amount',x.taxes_amount::float8,
+  'suggested_price_amount',x.suggested_price_amount::float8,
+  'capacity',x.capacity,
+  'available_capacity',x.available_capacity,
+  'low_stock_threshold',x.low_stock_threshold,
+  'status',x.status,
+  'sale_deadline',x.sale_deadline,
+  'sale_timezone',x.sale_timezone,
+  'min_passengers_per_booking',x.min_passengers_per_booking,
+  'max_passengers_per_booking',x.max_passengers_per_booking,
+  'confirmation_mode',x.confirmation_mode,
+  'minimum_group_size',x.minimum_group_size,
+  'availability_via_api',x.availability_via_api,
   'confirmation_label',CASE WHEN x.confirmation_mode='confirmed' THEN 'Salida confirmada' ELSE 'Sujeta a mínimo de pasajeros' END,
-  'sale_open',CASE WHEN x.sale_deadline IS NULL OR x.sale_deadline>=now() THEN true ELSE false END
+  'sale_open',CASE WHEN x.sale_deadline IS NULL OR x.sale_deadline>=now() THEN true ELSE false END,
+  'policy_cancellation',COALESCE(NULLIF(x.policy_cancellation,''),p.policy_cancellation),
+  'policy_changes',COALESCE(NULLIF(x.policy_changes,''),p.policy_changes),
+  'policy_refund',COALESCE(NULLIF(x.policy_refund,''),p.policy_refund),
+  'policy_no_show',COALESCE(NULLIF(x.policy_no_show,''),p.policy_no_show)
 )`;
 
 const catalogImagesJoin = `LEFT JOIN LATERAL (
@@ -80,19 +98,46 @@ const catalogImagesJoin = `LEFT JOIN LATERAL (
     (array_agg(ci.url ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at))[1] AS image_url,
     (array_agg(ci.alt_text ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at))[1] AS alt_text,
     COALESCE(jsonb_agg(jsonb_build_object(
-      'id',ci.id,'url',ci.url,'alt_text',ci.alt_text,'sort_order',ci.sort_order,'is_primary',ci.is_primary
+      'id',ci.id,
+      'url',ci.url,
+      'alt_text',ci.alt_text,
+      'title',ci.title,
+      'author_credit',ci.author_credit,
+      'usage_license',ci.usage_license,
+      'sort_order',ci.sort_order,
+      'is_primary',ci.is_primary
     ) ORDER BY ci.is_primary DESC,ci.sort_order,ci.created_at),'[]'::jsonb) AS images
   FROM rumbo_catalog_images ci
   WHERE ci.product_id=p.id
 ) image_gallery ON true`;
 
+const catalogTagsJoin = `LEFT JOIN LATERAL (
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'id',t.id,'code',t.code,'name',t.name,'tag_type',t.tag_type,'sort_order',pt.sort_order
+  ) ORDER BY pt.sort_order,t.name),'[]'::jsonb) AS tags
+  FROM rumbo_catalog_product_tags pt
+  JOIN rumbo_catalog_tags t ON t.id=pt.tag_id AND t.active=true
+  WHERE pt.product_id=p.id
+) tag_gallery ON true`;
+
+const catalogDetailsJoin = `LEFT JOIN LATERAL (
+  SELECT jsonb_strip_nulls(jsonb_build_object(
+    'package',(SELECT to_jsonb(pd)-'product_id'-'updated_at' FROM rumbo_catalog_package_details pd WHERE pd.product_id=p.id),
+    'hotels',(SELECT COALESCE(jsonb_agg(to_jsonb(hd)-'product_id'-'updated_at' ORDER BY hd.id),'[]'::jsonb) FROM rumbo_catalog_hotel_details hd WHERE hd.product_id=p.id),
+    'flights',(SELECT COALESCE(jsonb_agg(to_jsonb(fd)-'product_id'-'updated_at' ORDER BY fd.departure_local NULLS LAST,fd.id),'[]'::jsonb) FROM rumbo_catalog_flight_details fd WHERE fd.product_id=p.id),
+    'experiences',(SELECT COALESCE(jsonb_agg(to_jsonb(ed)-'product_id'-'updated_at' ORDER BY ed.start_time NULLS LAST,ed.id),'[]'::jsonb) FROM rumbo_catalog_experience_details ed WHERE ed.product_id=p.id)
+  )) AS product_details
+) detail_record ON true`;
+
 const catalogSelect = `
-SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.destination_iata,
+SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.country_code,p.city,p.destination_iata,
        p.product_type,p.provider,p.provider_reference,p.duration_label,p.tag,p.included,p.status,p.featured,p.sort_order,
-       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.capacity,d.available_capacity,d.low_stock_threshold,
-       d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,d.confirmation_mode,d.minimum_group_size,
+       p.policy_cancellation,p.policy_changes,p.policy_refund,p.policy_no_show,
+       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.taxes_amount::float8,d.suggested_price_amount::float8,
+       d.capacity,d.available_capacity,d.low_stock_threshold,d.sale_deadline,d.sale_timezone,d.min_passengers_per_booking,d.max_passengers_per_booking,d.confirmation_mode,d.minimum_group_size,d.availability_via_api,
        stats.from_price_amount,stats.active_departure_count,stats.departures,
-       image_gallery.image_url,image_gallery.alt_text,image_gallery.images
+       image_gallery.image_url,image_gallery.alt_text,image_gallery.images,
+       tag_gallery.tags,detail_record.product_details
 FROM rumbo_catalog_products p
 LEFT JOIN LATERAL (
   SELECT * FROM rumbo_catalog_departures d
@@ -108,7 +153,9 @@ LEFT JOIN LATERAL (
    WHERE x.product_id=p.id AND x.status='active' AND (x.departure_date IS NULL OR x.departure_date>=current_date)
      AND (x.sale_deadline IS NULL OR x.sale_deadline>=now())
 ) stats ON true
-${catalogImagesJoin}`;
+${catalogImagesJoin}
+${catalogTagsJoin}
+${catalogDetailsJoin}`;
 
 app.get("/api/catalog", async (req, res) => {
   const destination = clean(req.query.destination).toUpperCase();
@@ -190,15 +237,19 @@ app.get("/api/bookings/:reference", async (req, res) => {
 });
 
 const adminCatalogSelect = `
-SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.city,p.destination_iata,
+SELECT p.id,p.slug,p.name,p.short_description,p.description,p.country,p.country_code,p.city,p.destination_iata,
        p.product_type,p.provider,p.provider_reference,p.duration_label,p.tag,p.included,p.status,p.featured,p.sort_order,
-       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.cost_amount::float8,
+       p.policy_cancellation,p.policy_changes,p.policy_refund,p.policy_no_show,p.provider_updated_at,p.provider_product_url,p.observations,
+       d.id AS departure_id,d.origin_iata,d.departure_date,d.return_date,d.currency,d.price_amount::float8,d.cost_amount::float8,d.taxes_amount::float8,d.suggested_price_amount::float8,
        (d.price_amount-COALESCE(d.cost_amount,d.price_amount))::float8 AS margin_amount,
        CASE WHEN d.price_amount>0 AND d.cost_amount IS NOT NULL THEN ROUND(((d.price_amount-d.cost_amount)/d.price_amount)*100,2)::float8 ELSE NULL END AS margin_pct,
-       d.capacity,d.available_capacity,d.low_stock_threshold,d.sale_deadline,d.min_passengers_per_booking,d.max_passengers_per_booking,
-       d.confirmation_mode,d.minimum_group_size,
+       d.capacity,d.available_capacity,d.low_stock_threshold,d.sale_deadline,d.sale_timezone,d.min_passengers_per_booking,d.max_passengers_per_booking,
+       d.confirmation_mode,d.minimum_group_size,d.provider_variant_reference,d.availability_via_api,d.api_rate_reference,d.api_inventory_reference,
+       d.policy_cancellation AS variant_policy_cancellation,d.policy_changes AS variant_policy_changes,d.policy_refund AS variant_policy_refund,d.policy_no_show AS variant_policy_no_show,
+       d.provider_updated_at AS departure_provider_updated_at,d.observations AS departure_observations,
        stats.from_price_amount,stats.active_departure_count,stats.departures,
-       image_gallery.image_url,image_gallery.alt_text,image_gallery.images
+       image_gallery.image_url,image_gallery.alt_text,image_gallery.images,
+       tag_gallery.tags,detail_record.product_details
 FROM rumbo_catalog_products p
 LEFT JOIN LATERAL (
   SELECT * FROM rumbo_catalog_departures d WHERE d.product_id=p.id AND d.status='active' ORDER BY d.departure_date NULLS LAST,d.price_amount LIMIT 1
@@ -207,16 +258,21 @@ LEFT JOIN LATERAL (
   SELECT MIN(x.price_amount)::float8 AS from_price_amount,COUNT(*)::int AS active_departure_count,
          COALESCE(jsonb_agg(jsonb_build_object(
            'id',x.id,'origin_iata',x.origin_iata,'departure_date',x.departure_date,'return_date',x.return_date,
-           'currency',x.currency,'price_amount',x.price_amount::float8,'cost_amount',x.cost_amount::float8,
+           'currency',x.currency,'price_amount',x.price_amount::float8,'cost_amount',x.cost_amount::float8,'taxes_amount',x.taxes_amount::float8,'suggested_price_amount',x.suggested_price_amount::float8,
            'margin_amount',(x.price_amount-COALESCE(x.cost_amount,x.price_amount))::float8,
            'margin_pct',CASE WHEN x.price_amount>0 AND x.cost_amount IS NOT NULL THEN ROUND(((x.price_amount-x.cost_amount)/x.price_amount)*100,2)::float8 ELSE NULL END,
            'capacity',x.capacity,'available_capacity',x.available_capacity,'low_stock_threshold',x.low_stock_threshold,'status',x.status,
-           'sale_deadline',x.sale_deadline,'min_passengers_per_booking',x.min_passengers_per_booking,'max_passengers_per_booking',x.max_passengers_per_booking,
-           'confirmation_mode',x.confirmation_mode,'minimum_group_size',x.minimum_group_size
-         ) ORDER BY (x.price_amount-COALESCE(x.cost_amount,x.price_amount)) DESC,x.departure_date NULLS LAST),'[]'::jsonb) AS departures
-    FROM rumbo_catalog_departures x WHERE x.product_id=p.id AND x.status='active'
+           'sale_deadline',x.sale_deadline,'sale_timezone',x.sale_timezone,'min_passengers_per_booking',x.min_passengers_per_booking,'max_passengers_per_booking',x.max_passengers_per_booking,
+           'confirmation_mode',x.confirmation_mode,'minimum_group_size',x.minimum_group_size,'provider_variant_reference',x.provider_variant_reference,
+           'availability_via_api',x.availability_via_api,'api_rate_reference',x.api_rate_reference,'api_inventory_reference',x.api_inventory_reference,
+           'policy_cancellation',x.policy_cancellation,'policy_changes',x.policy_changes,'policy_refund',x.policy_refund,'policy_no_show',x.policy_no_show,
+           'provider_updated_at',x.provider_updated_at,'observations',x.observations
+         ) ORDER BY x.departure_date NULLS LAST,x.price_amount),'[]'::jsonb) AS departures
+    FROM rumbo_catalog_departures x WHERE x.product_id=p.id
 ) stats ON true
-${catalogImagesJoin}`;
+${catalogImagesJoin}
+${catalogTagsJoin}
+${catalogDetailsJoin}`;
 
 app.get("/api/admin/catalog", requireAdmin, async (req, res) => {
   const sort = clean(req.query.sort);
@@ -227,12 +283,37 @@ app.get("/api/admin/catalog", requireAdmin, async (req, res) => {
 
 function departureFields(body) {
   const price = Number(body.price_amount), capacity = body.capacity === "" || body.capacity == null ? null : Number(body.capacity);
+  const availableCapacity = body.available_capacity === "" || body.available_capacity == null ? capacity : Number(body.available_capacity);
   const minPassengers = Math.max(1, Number(body.min_passengers_per_booking ?? 1));
   const maxPassengers = Math.min(18, Math.max(minPassengers, Number(body.max_passengers_per_booking ?? 9)));
   const cost = body.cost_amount === "" || body.cost_amount == null ? null : Number(body.cost_amount);
+  const taxes = body.taxes_amount === "" || body.taxes_amount == null ? null : Number(body.taxes_amount);
+  const suggestedPrice = body.suggested_price_amount === "" || body.suggested_price_amount == null ? null : Number(body.suggested_price_amount);
   const confirmationMode = clean(body.confirmation_mode) === "minimum_required" ? "minimum_required" : "confirmed";
   const minimumGroupSize = confirmationMode === "minimum_required" ? Math.max(1, Number(body.minimum_group_size ?? minPassengers)) : null;
-  return { price, capacity, minPassengers, maxPassengers, cost, confirmationMode, minimumGroupSize };
+  return {
+    price,
+    cost,
+    taxes,
+    suggestedPrice,
+    capacity,
+    availableCapacity,
+    minPassengers,
+    maxPassengers,
+    confirmationMode,
+    minimumGroupSize,
+    providerVariantReference: clean(body.provider_variant_reference) || null,
+    saleTimezone: clean(body.sale_timezone) || null,
+    availabilityViaApi: Boolean(body.availability_via_api),
+    apiRateReference: clean(body.api_rate_reference) || null,
+    apiInventoryReference: clean(body.api_inventory_reference) || null,
+    policyCancellation: clean(body.policy_cancellation) || null,
+    policyChanges: clean(body.policy_changes) || null,
+    policyRefund: clean(body.policy_refund) || null,
+    policyNoShow: clean(body.policy_no_show) || null,
+    providerUpdatedAt: clean(body.provider_updated_at) || null,
+    observations: clean(body.observations) || null,
+  };
 }
 
 app.post("/api/admin/catalog", requireAdmin, async (req, res) => {
