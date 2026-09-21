@@ -146,7 +146,9 @@ export default function CatalogPanel() {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.message || "No pudimos cargar el catálogo.");
         if (!active) return;
-        setProducts((payload.products || []) as Product[]);
+        const list = (payload.products || []) as Product[];
+        if (!list.length) throw new Error("El catálogo respondió vacío; lo volveremos a consultar.");
+        setProducts(list);
         setError("");
         timer = window.setTimeout(() => void refresh(0), 5 * 60 * 1000);
       } catch (reason) {
