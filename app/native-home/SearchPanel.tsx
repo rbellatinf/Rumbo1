@@ -25,7 +25,7 @@ type Props = {
   departureDate: string;
   returnDate: string;
   adults: number;
-  children: number;
+  childrenCount: number;
   searching: boolean;
   airportState: SourceState;
   packageState: SourceState;
@@ -51,9 +51,9 @@ const products: Array<{ id: ProductType; label: string; icon: typeof Plane }> = 
 
 export default function SearchPanel(p: Props) {
   const [travellerOpen,setTravellerOpen]=useState(false);
-  const travellers=p.adults+p.children;
-  const setAdults=(delta:number)=>p.onAdults(Math.max(1,Math.min(18-p.children,p.adults+delta)));
-  const setChildren=(delta:number)=>p.onChildren(Math.max(0,Math.min(18-p.adults,p.children+delta)));
+  const travellers=p.adults+p.childrenCount;
+  const setAdults=(delta:number)=>p.onAdults(Math.max(1,Math.min(18-p.childrenCount,p.adults+delta)));
+  const setChildren=(delta:number)=>p.onChildren(Math.max(0,Math.min(18-p.adults,p.childrenCount+delta)));
 
   return (
     <div className="search-shell" id="buscador">
@@ -86,7 +86,7 @@ export default function SearchPanel(p: Props) {
           {travellerOpen ? (
             <div className="traveller-popover">
               <div><span><strong>Adultos</strong><small>18 años o más</small></span><div className="traveller-stepper"><button type="button" onClick={()=>setAdults(-1)} disabled={p.adults<=1}><Minus/></button><strong>{p.adults}</strong><button type="button" onClick={()=>setAdults(1)} disabled={travellers>=18}><Plus/></button></div></div>
-              <div><span><strong>Niños</strong><small>0 a 17 años</small></span><div className="traveller-stepper"><button type="button" onClick={()=>setChildren(-1)} disabled={p.children<=0}><Minus/></button><strong>{p.children}</strong><button type="button" onClick={()=>setChildren(1)} disabled={travellers>=18}><Plus/></button></div></div>
+              <div><span><strong>Niños</strong><small>0 a 17 años</small></span><div className="traveller-stepper"><button type="button" onClick={()=>setChildren(-1)} disabled={p.childrenCount<=0}><Minus/></button><strong>{p.childrenCount}</strong><button type="button" onClick={()=>setChildren(1)} disabled={travellers>=18}><Plus/></button></div></div>
               <button className="traveller-done" type="button" onClick={()=>setTravellerOpen(false)}>Listo</button>
             </div>
           ) : null}
