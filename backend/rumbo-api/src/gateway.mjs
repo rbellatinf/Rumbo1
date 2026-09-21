@@ -316,60 +316,345 @@ function departureFields(body) {
   };
 }
 
+function catalogBoolean(value) {
+  if (typeof value === "boolean") return value;
+  const normalized = clean(value).toLowerCase();
+  if (["1","true","yes","si","sí"].includes(normalized)) return true;
+  if (["0","false","no"].includes(normalized)) return false;
+  return null;
+}
+
+async function saveCatalogTags(client, productId, tags) {
+  if (!Array.isArray(tags)) return;
+  await client.query(\`DELETE FROM rumbo_catalog_product_tags WHERE product_id=$1\`, [productId]);
+  for (let index = 0; index < tags.length; index += 1) {
+    const raw = typeof tags[index] === "string" ? { name: tags[index] } : tags[index] || {};
+    const name = clean(raw.name || raw.tag);
+    if (!name) continue;
+    const code = clean(raw.code || name).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,60);
+    const type = ["commercial","theme","audience","amenity","legacy"].includes(clean(raw.tag_type || raw.type)) ? clean(raw.tag_type || raw.type) : "commercial";
+    const tag = (await client.query(
+      \`INSERT INTO rumbo_catalog_tags(code,name,tag_type) VALUES($1,$2,$3)
+       ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name,tag_type=EXCLUDED.tag_type,active=true
+       RETURNING id\`,
+      [code || \`TAG_\${index+1}\`,name,type],
+    )).rows[0];
+    await client.query(
+      \`INSERT INTO rumbo_catalog_product_tags(product_id,tag_id,sort_order,observations)
+       VALUES($1,$2,$3,$4) ON CONFLICT(product_id,tag_id)
+       DO UPDATE SET sort_order=EXCLUDED.sort_order,observations=EXCLUDED.observations\`,
+      [productId,tag.id,Number(raw.sort_order ?? raw.order ?? index) || 0,clean(raw.observations) || null],
+    );
+  }
+}
+
+async function saveCatalogDetails(client, productId, productType, details) {
+  if (!details || typeof details !== "object") return;
+  const type = clean(productType);
+  if (type === "package") {
+    const d = details.package && typeof details.package === "object" ? details.package : details;
+    await client.query(
+      \`INSERT INTO rumbo_catalog_package_details(
+         product_id,origin_iata,flight_included,airline,hotel_included,hotel_name,hotel_category,room_type,meal_plan,
+         transfers_included,excursions_included,insurance_included,detailed_itinerary,documentation_requirements,operational_notes,updated_at
+       ) VALUES($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+       ON CONFLICT(product_id) DO UPDATE SET
+         origin_iata=EXCLUDED.origin_iata,flight_included=EXCLUDED.flight_included,airline=EXCLUDED.airline,
+         hotel_included=EXCLUDED.hotel_included,hotel_name=EXCLUDED.hotel_name,hotel_category=EXCLUDED.hotel_category,
+         room_type=EXCLUDED.room_type,meal_plan=EXCLUDED.meal_plan,transfers_included=EXCLUDED.transfers_included,
+         excursions_included=EXCLUDED.excursions_included,insurance_included=EXCLUDED.insurance_included,
+         detailed_itinerary=EXCLUDED.detailed_itinerary,documentation_requirements=EXCLUDED.documentation_requirements,
+         operational_notes=EXCLUDED.operational_notes,updated_at=now()\`,
+      [
+        productId,clean(d.origin_iata).toUpperCase(),catalogBoolean(d.flight_included),clean(d.airline)||null,
+        catalogBoolean(d.hotel_included),clean(d.hotel_name)||null,clean(d.hotel_category)||null,clean(d.room_type)||null,
+        clean(d.meal_plan)||null,catalogBoolean(d.transfers_included),clean(d.excursions_included)||null,
+        catalogBoolean(d.insurance_included),clean(d.detailed_itinerary)||null,clean(d.documentation_requirements)||null,
+        clean(d.operational_notes)||null,
+      ],
+    );
+    return;
+  }
+
+  if (type === "hotel") {
+    const rows = Array.isArray(details.hotels) ? details.hotels : [details.hotel || details];
+    await client.query(\`DELETE FROM rumbo_catalog_hotel_details WHERE product_id=$1\`,[productId]);
+    for (const d of rows) {
+      if (!d || typeof d !== "object") continue;
+      await client.query(
+        \`INSERT INTO rumbo_catalog_hotel_details(
+           product_id,provider_hotel_id,hotel_name,star_category,address,latitude,longitude,check_in_time,check_out_time,
+           provider_room_id,room_type,max_occupancy,provider_rate_plan_id,meal_plan,amenities,children_policy,pets_policy,observations
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,'')::time,NULLIF($9,'')::time,$10,$11,$12,$13,$14,$15,$16,$17,$18)\`,
+        [productId,clean(d.provider_hotel_id)||null,clean(d.hotel_name)||null,d.star_category==null||d.star_category===""?null:Number(d.star_category),
+         clean(d.address)||null,d.latitude==null||d.latitude===""?null:Number(d.latitude),d.longitude==null||d.longitude===""?null:Number(d.longitude),
+         clean(d.check_in_time),clean(d.check_out_time),clean(d.provider_room_id)||null,clean(d.room_type)||null,
+         d.max_occupancy==null||d.max_occupancy===""?null:Number(d.max_occupancy),clean(d.provider_rate_plan_id)||null,clean(d.meal_plan)||null,
+         clean(d.amenities)||null,clean(d.children_policy)||null,clean(d.pets_policy)||null,clean(d.observations)||null],
+      );
+    }
+    return;
+  }
+
+  if (type === "flight") {
+    const rows = Array.isArray(details.flights) ? details.flights : [details.flight || details];
+    await client.query(\`DELETE FROM rumbo_catalog_flight_details WHERE product_id=$1\`,[productId]);
+    for (const d of rows) {
+      if (!d || typeof d !== "object") continue;
+      await client.query(
+        \`INSERT INTO rumbo_catalog_flight_details(
+           product_id,departure_id,provider_variant_reference,airline_iata,flight_number,origin_iata,destination_iata,
+           departure_local,arrival_local,origin_timezone,destination_timezone,cabin,fare_family,booking_class,stops,
+           checked_baggage,cabin_baggage,seat_included,refundable,changes_allowed,provider_offer_reference,observations
+         ) VALUES($1,NULLIF($2,'')::uuid,$3,NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,'')::timestamp,NULLIF($9,'')::timestamp,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)\`,
+        [productId,clean(d.departure_id),clean(d.provider_variant_reference)||null,clean(d.airline_iata).toUpperCase(),
+         clean(d.flight_number)||null,clean(d.origin_iata).toUpperCase(),clean(d.destination_iata).toUpperCase(),
+         clean(d.departure_local),clean(d.arrival_local),clean(d.origin_timezone)||null,clean(d.destination_timezone)||null,
+         clean(d.cabin)||null,clean(d.fare_family)||null,clean(d.booking_class)||null,d.stops==null||d.stops===""?null:Number(d.stops),
+         clean(d.checked_baggage)||null,clean(d.cabin_baggage)||null,catalogBoolean(d.seat_included),catalogBoolean(d.refundable),
+         catalogBoolean(d.changes_allowed),clean(d.provider_offer_reference)||null,clean(d.observations)||null],
+      );
+    }
+    return;
+  }
+
+  if (type === "experience") {
+    const rows = Array.isArray(details.experiences) ? details.experiences : [details.experience || details];
+    await client.query(\`DELETE FROM rumbo_catalog_experience_details WHERE product_id=$1\`,[productId]);
+    for (const d of rows) {
+      if (!d || typeof d !== "object") continue;
+      await client.query(
+        \`INSERT INTO rumbo_catalog_experience_details(
+           product_id,provider_activity_id,meeting_point,latitude,longitude,duration,start_time,languages,minimum_age,maximum_age,
+           accessibility,what_to_bring,restrictions,instant_confirmation,voucher_type,observations
+         ) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,'')::time,$8,$9,$10,$11,$12,$13,$14,$15,$16)\`,
+        [productId,clean(d.provider_activity_id)||null,clean(d.meeting_point)||null,
+         d.latitude==null||d.latitude===""?null:Number(d.latitude),d.longitude==null||d.longitude===""?null:Number(d.longitude),
+         clean(d.duration)||null,clean(d.start_time),clean(d.languages)||null,
+         d.minimum_age==null||d.minimum_age===""?null:Number(d.minimum_age),d.maximum_age==null||d.maximum_age===""?null:Number(d.maximum_age),
+         clean(d.accessibility)||null,clean(d.what_to_bring)||null,clean(d.restrictions)||null,catalogBoolean(d.instant_confirmation),
+         clean(d.voucher_type)||null,clean(d.observations)||null],
+      );
+    }
+  }
+}
+
 app.post("/api/admin/catalog", requireAdmin, async (req, res) => {
-  const name = clean(req.body.name), slug = clean(req.body.slug).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const name = clean(req.body.name);
+  const slug = clean(req.body.slug).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
   const status = clean(req.body.status) || "draft";
-  if (!name || !slug || !["draft","published","archived"].includes(status)) return res.status(422).json({ error: { message: "Nombre, slug y estado son obligatorios." } });
-  const included = Array.isArray(req.body.included) ? req.body.included.map((x) => clean(x)).filter(Boolean).slice(0,30) : [];
+  const productType = clean(req.body.product_type) || "package";
+  if (!name || !slug || !["draft","published","archived"].includes(status) || !["package","hotel","flight","experience","other"].includes(productType)) {
+    return res.status(422).json({ error: { message: "Nombre, slug, tipo de producto y estado son obligatorios." } });
+  }
+  const included = Array.isArray(req.body.included) ? req.body.included.map((x) => clean(x)).filter(Boolean).slice(0,60) : [];
+  const countryCode = /^[A-Z]{2}$/.test(clean(req.body.country_code).toUpperCase()) ? clean(req.body.country_code).toUpperCase() : null;
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const product = (await client.query(`INSERT INTO rumbo_catalog_products(slug,name,short_description,description,country,city,destination_iata,product_type,provider,provider_reference,duration_label,tag,included,status,featured,sort_order) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16) RETURNING *`, [slug,name,clean(req.body.short_description)||null,clean(req.body.description)||null,clean(req.body.country)||null,clean(req.body.city)||null,clean(req.body.destination_iata).toUpperCase(),clean(req.body.product_type)||"package",clean(req.body.provider)||"Rumbo",clean(req.body.provider_reference)||null,clean(req.body.duration_label)||null,clean(req.body.tag)||null,JSON.stringify(included),status,Boolean(req.body.featured),Number(req.body.sort_order)||0])).rows[0];
+    const product = (await client.query(
+      \`INSERT INTO rumbo_catalog_products(
+         slug,name,short_description,description,country,country_code,city,destination_iata,product_type,provider,provider_reference,
+         duration_label,tag,included,status,featured,sort_order,policy_cancellation,policy_changes,policy_refund,policy_no_show,
+         provider_updated_at,provider_product_url,observations
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,'')::timestamptz,$23,$24)
+       RETURNING *\`,
+      [slug,name,clean(req.body.short_description)||null,clean(req.body.description)||null,clean(req.body.country)||null,countryCode,
+       clean(req.body.city)||null,clean(req.body.destination_iata).toUpperCase(),productType,clean(req.body.provider)||"Rumbo",
+       clean(req.body.provider_reference)||null,clean(req.body.duration_label)||null,clean(req.body.tag)||null,JSON.stringify(included),
+       status,Boolean(req.body.featured),Number(req.body.sort_order)||0,clean(req.body.policy_cancellation)||null,clean(req.body.policy_changes)||null,
+       clean(req.body.policy_refund)||null,clean(req.body.policy_no_show)||null,clean(req.body.provider_updated_at),
+       clean(req.body.provider_product_url)||null,clean(req.body.observations)||null],
+    )).rows[0];
+
+    await saveCatalogTags(client, product.id, req.body.tags);
+    await saveCatalogDetails(client, product.id, productType, req.body.details);
+
     const d = departureFields(req.body);
     if (Number.isFinite(d.price) && d.price >= 0) {
-      await client.query(`INSERT INTO rumbo_catalog_departures(product_id,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,low_stock_threshold,sale_deadline,min_passengers_per_booking,max_passengers_per_booking,confirmation_mode,minimum_group_size,status) VALUES($1,NULLIF($2,''),NULLIF($3,'')::date,NULLIF($4,'')::date,$5,$6,$7,$8,$8,$9,NULLIF($10,'')::timestamptz,$11,$12,$13,$14,'active')`, [product.id,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.capacity,Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.minPassengers,d.maxPassengers,d.confirmationMode,d.minimumGroupSize]);
+      await client.query(
+        \`INSERT INTO rumbo_catalog_departures(
+           product_id,provider_variant_reference,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,taxes_amount,suggested_price_amount,
+           capacity,available_capacity,low_stock_threshold,sale_deadline,sale_timezone,min_passengers_per_booking,max_passengers_per_booking,
+           confirmation_mode,minimum_group_size,availability_via_api,api_rate_reference,api_inventory_reference,
+           policy_cancellation,policy_changes,policy_refund,policy_no_show,provider_updated_at,observations,status
+         ) VALUES($1,$2,NULLIF($3,''),NULLIF($4,'')::date,NULLIF($5,'')::date,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,'')::timestamptz,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,NULLIF($27,'')::timestamptz,$28,'active')\`,
+        [product.id,d.providerVariantReference,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),
+         clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.taxes,d.suggestedPrice,d.capacity,d.availableCapacity,
+         Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.saleTimezone,d.minPassengers,d.maxPassengers,
+         d.confirmationMode,d.minimumGroupSize,d.availabilityViaApi,d.apiRateReference,d.apiInventoryReference,d.policyCancellation,d.policyChanges,
+         d.policyRefund,d.policyNoShow,d.providerUpdatedAt,d.observations],
+      );
     }
+
     const imageUrl = clean(req.body.image_url);
-    if (imageUrl) await client.query(`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,is_primary) VALUES($1,$2,$3,true)`,[product.id,imageUrl,clean(req.body.image_alt)||name]);
+    if (imageUrl) {
+      await client.query(
+        \`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,title,author_credit,usage_license,sort_order,is_primary,provider_updated_at,observations)
+         VALUES($1,$2,$3,$4,$5,$6,0,true,NULLIF($7,'')::timestamptz,$8)\`,
+        [product.id,imageUrl,clean(req.body.image_alt)||name,clean(req.body.image_title)||null,clean(req.body.image_author_credit)||null,
+         clean(req.body.image_usage_license)||null,clean(req.body.image_provider_updated_at),clean(req.body.image_observations)||null],
+      );
+    }
+
     await client.query("COMMIT");
-    await audit(req.adminSession.email,"catalog.product_created","catalog_product",product.id,{name,status});
+    await audit(req.adminSession.email,"catalog.product_created","catalog_product",product.id,{name,status,product_type:productType});
     res.status(201).json({ product });
   } catch (error) {
     await client.query("ROLLBACK").catch(()=>{});
-    if (error.code === "23505") return res.status(409).json({ error: { message: "Ya existe un producto con ese slug." } });
-    console.error(error); res.status(500).json({ error: { message: "No pudimos crear el producto." } });
+    if (error.code === "23505") return res.status(409).json({ error: { message: "Ya existe un producto con ese código o referencia." } });
+    console.error(error);
+    res.status(500).json({ error: { message: "No pudimos crear el producto." } });
   } finally { client.release(); }
 });
 
 app.patch("/api/admin/catalog/:id", requireAdmin, async (req, res) => {
   const status = clean(req.body.status);
+  const productType = clean(req.body.product_type);
   if (status && !["draft","published","archived"].includes(status)) return res.status(422).json({ error: { message: "Estado inválido." } });
-  const { rows } = await pool.query(`UPDATE rumbo_catalog_products SET name=COALESCE(NULLIF($2,''),name),short_description=COALESCE($3,short_description),description=COALESCE($4,description),country=COALESCE($5,country),city=COALESCE($6,city),destination_iata=COALESCE(NULLIF($7,''),destination_iata),duration_label=COALESCE($8,duration_label),tag=COALESCE($9,tag),status=COALESCE(NULLIF($10,''),status),featured=COALESCE($11,featured),sort_order=COALESCE($12,sort_order) WHERE id=$1 RETURNING *`, [req.params.id,clean(req.body.name),req.body.short_description ?? null,req.body.description ?? null,req.body.country ?? null,req.body.city ?? null,clean(req.body.destination_iata).toUpperCase(),req.body.duration_label ?? null,req.body.tag ?? null,status,typeof req.body.featured === "boolean" ? req.body.featured : null,Number.isFinite(Number(req.body.sort_order)) ? Number(req.body.sort_order) : null]);
+  if (productType && !["package","hotel","flight","experience","other"].includes(productType)) return res.status(422).json({ error: { message: "Tipo de producto inválido." } });
+  const included = Array.isArray(req.body.included) ? JSON.stringify(req.body.included.map((x)=>clean(x)).filter(Boolean).slice(0,60)) : null;
+  const code = clean(req.body.country_code).toUpperCase();
+  const { rows } = await pool.query(
+    \`UPDATE rumbo_catalog_products SET
+       name=COALESCE(NULLIF($2,''),name),
+       short_description=COALESCE($3,short_description),
+       description=COALESCE($4,description),
+       country=COALESCE($5,country),
+       country_code=COALESCE(NULLIF($6,'')::char(2),country_code),
+       city=COALESCE($7,city),
+       destination_iata=COALESCE(NULLIF($8,''),destination_iata),
+       product_type=COALESCE(NULLIF($9,''),product_type),
+       provider=COALESCE(NULLIF($10,''),provider),
+       provider_reference=COALESCE(NULLIF($11,''),provider_reference),
+       duration_label=COALESCE($12,duration_label),
+       tag=COALESCE($13,tag),
+       included=COALESCE($14::jsonb,included),
+       status=COALESCE(NULLIF($15,''),status),
+       featured=COALESCE($16,featured),
+       sort_order=COALESCE($17,sort_order),
+       policy_cancellation=COALESCE($18,policy_cancellation),
+       policy_changes=COALESCE($19,policy_changes),
+       policy_refund=COALESCE($20,policy_refund),
+       policy_no_show=COALESCE($21,policy_no_show),
+       provider_updated_at=COALESCE(NULLIF($22,'')::timestamptz,provider_updated_at),
+       provider_product_url=COALESCE($23,provider_product_url),
+       observations=COALESCE($24,observations)
+     WHERE id=$1 RETURNING *\`,
+    [req.params.id,clean(req.body.name),req.body.short_description ?? null,req.body.description ?? null,req.body.country ?? null,
+     /^[A-Z]{2}$/.test(code)?code:"",req.body.city ?? null,clean(req.body.destination_iata).toUpperCase(),productType,
+     clean(req.body.provider),clean(req.body.provider_reference),req.body.duration_label ?? null,req.body.tag ?? null,included,status,
+     typeof req.body.featured === "boolean" ? req.body.featured : null,Number.isFinite(Number(req.body.sort_order)) ? Number(req.body.sort_order) : null,
+     req.body.policy_cancellation ?? null,req.body.policy_changes ?? null,req.body.policy_refund ?? null,req.body.policy_no_show ?? null,
+     clean(req.body.provider_updated_at),req.body.provider_product_url ?? null,req.body.observations ?? null],
+  );
   if (!rows[0]) return res.status(404).json({ error: { message: "Producto no encontrado." } });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (Array.isArray(req.body.tags)) await saveCatalogTags(client,req.params.id,req.body.tags);
+    if (req.body.details && typeof req.body.details === "object") await saveCatalogDetails(client,req.params.id,productType||rows[0].product_type,req.body.details);
+    await client.query("COMMIT");
+  } catch(error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    console.error(error);
+    return res.status(500).json({error:{message:"El producto se actualizó, pero no pudimos guardar sus tags o ficha específica."}});
+  } finally { client.release(); }
+
   await audit(req.adminSession.email,"catalog.product_updated","catalog_product",req.params.id,req.body);
   res.json({ product: rows[0] });
 });
 
+app.put("/api/admin/catalog/:id/tags", requireAdmin, async (req,res)=>{
+  if(!Array.isArray(req.body.tags)) return res.status(422).json({error:{message:"Envía una lista de tags."}});
+  const client=await pool.connect();
+  try{await client.query("BEGIN");await saveCatalogTags(client,req.params.id,req.body.tags);await client.query("COMMIT");await audit(req.adminSession.email,"catalog.tags_updated","catalog_product",req.params.id,{count:req.body.tags.length});res.json({ok:true})}
+  catch(error){await client.query("ROLLBACK").catch(()=>{});console.error(error);res.status(500).json({error:{message:"No pudimos guardar los tags."}})}
+  finally{client.release()}
+});
+
+app.put("/api/admin/catalog/:id/details", requireAdmin, async (req,res)=>{
+  const product=(await pool.query(\`SELECT product_type FROM rumbo_catalog_products WHERE id=$1\`,[req.params.id])).rows[0];
+  if(!product)return res.status(404).json({error:{message:"Producto no encontrado."}});
+  const client=await pool.connect();
+  try{await client.query("BEGIN");await saveCatalogDetails(client,req.params.id,product.product_type,req.body.details||req.body);await client.query("COMMIT");await audit(req.adminSession.email,"catalog.details_updated","catalog_product",req.params.id,{product_type:product.product_type});res.json({ok:true})}
+  catch(error){await client.query("ROLLBACK").catch(()=>{});console.error(error);res.status(500).json({error:{message:"No pudimos guardar la ficha específica del producto."}})}
+  finally{client.release()}
+});
+
 app.post("/api/admin/catalog/:id/departures", requireAdmin, async (req, res) => {
   const d = departureFields(req.body);
-  if (!Number.isFinite(d.price) || d.price < 0) return res.status(422).json({ error: { message: "Precio inválido." } });
-  const { rows } = await pool.query(`INSERT INTO rumbo_catalog_departures(product_id,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,capacity,available_capacity,low_stock_threshold,sale_deadline,min_passengers_per_booking,max_passengers_per_booking,confirmation_mode,minimum_group_size,status) VALUES($1,NULLIF($2,''),NULLIF($3,'')::date,NULLIF($4,'')::date,$5,$6,$7,$8,$8,$9,NULLIF($10,'')::timestamptz,$11,$12,$13,$14,'active') RETURNING *, (price_amount-COALESCE(cost_amount,price_amount))::float8 AS margin_amount`, [req.params.id,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.capacity,Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.minPassengers,d.maxPassengers,d.confirmationMode,d.minimumGroupSize]);
+  const status = ["active","sold_out","inactive"].includes(clean(req.body.status)) ? clean(req.body.status) : "active";
+  if (!Number.isFinite(d.price) || d.price < 0) return res.status(422).json({ error: { message: "Precio comercial final inválido." } });
+  const { rows } = await pool.query(
+    \`INSERT INTO rumbo_catalog_departures(
+       product_id,provider_variant_reference,origin_iata,departure_date,return_date,currency,price_amount,cost_amount,taxes_amount,suggested_price_amount,
+       capacity,available_capacity,low_stock_threshold,sale_deadline,sale_timezone,min_passengers_per_booking,max_passengers_per_booking,
+       confirmation_mode,minimum_group_size,availability_via_api,api_rate_reference,api_inventory_reference,
+       policy_cancellation,policy_changes,policy_refund,policy_no_show,provider_updated_at,observations,status
+     ) VALUES($1,$2,NULLIF($3,''),NULLIF($4,'')::date,NULLIF($5,'')::date,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,'')::timestamptz,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,NULLIF($27,'')::timestamptz,$28,$29)
+     RETURNING *, (price_amount-COALESCE(cost_amount,price_amount))::float8 AS margin_amount,
+       CASE WHEN price_amount>0 AND cost_amount IS NOT NULL THEN ROUND(((price_amount-cost_amount)/price_amount)*100,2)::float8 ELSE NULL END AS margin_pct\`,
+    [req.params.id,d.providerVariantReference,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),clean(req.body.return_date),
+     clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.taxes,d.suggestedPrice,d.capacity,d.availableCapacity,
+     Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.saleTimezone,d.minPassengers,d.maxPassengers,
+     d.confirmationMode,d.minimumGroupSize,d.availabilityViaApi,d.apiRateReference,d.apiInventoryReference,d.policyCancellation,d.policyChanges,
+     d.policyRefund,d.policyNoShow,d.providerUpdatedAt,d.observations,status],
+  );
   await audit(req.adminSession.email,"catalog.departure_created","catalog_product",req.params.id,{departure_id:rows[0].id});
   res.status(201).json({ departure: rows[0] });
 });
 
+app.patch("/api/admin/catalog/:id/departures/:departureId", requireAdmin, async (req,res)=>{
+  const d=departureFields(req.body);
+  const status=["active","sold_out","inactive"].includes(clean(req.body.status))?clean(req.body.status):"active";
+  if(!Number.isFinite(d.price)||d.price<0)return res.status(422).json({error:{message:"Precio comercial final inválido."}});
+  const {rows}=await pool.query(
+    \`UPDATE rumbo_catalog_departures SET
+       provider_variant_reference=$3,origin_iata=NULLIF($4,''),departure_date=NULLIF($5,'')::date,return_date=NULLIF($6,'')::date,
+       currency=$7,price_amount=$8,cost_amount=$9,taxes_amount=$10,suggested_price_amount=$11,capacity=$12,
+       available_capacity=$13,low_stock_threshold=$14,sale_deadline=NULLIF($15,'')::timestamptz,sale_timezone=$16,
+       min_passengers_per_booking=$17,max_passengers_per_booking=$18,confirmation_mode=$19,minimum_group_size=$20,
+       availability_via_api=$21,api_rate_reference=$22,api_inventory_reference=$23,policy_cancellation=$24,policy_changes=$25,
+       policy_refund=$26,policy_no_show=$27,provider_updated_at=NULLIF($28,'')::timestamptz,observations=$29,status=$30
+     WHERE product_id=$1 AND id=$2 RETURNING *,
+       (price_amount-COALESCE(cost_amount,price_amount))::float8 AS margin_amount,
+       CASE WHEN price_amount>0 AND cost_amount IS NOT NULL THEN ROUND(((price_amount-cost_amount)/price_amount)*100,2)::float8 ELSE NULL END AS margin_pct\`,
+    [req.params.id,req.params.departureId,d.providerVariantReference,clean(req.body.origin_iata).toUpperCase(),clean(req.body.departure_date),
+     clean(req.body.return_date),clean(req.body.currency).toUpperCase()||"USD",d.price,d.cost,d.taxes,d.suggestedPrice,d.capacity,d.availableCapacity,
+     Math.max(0,Number(req.body.low_stock_threshold ?? 5)),clean(req.body.sale_deadline),d.saleTimezone,d.minPassengers,d.maxPassengers,
+     d.confirmationMode,d.minimumGroupSize,d.availabilityViaApi,d.apiRateReference,d.apiInventoryReference,d.policyCancellation,d.policyChanges,
+     d.policyRefund,d.policyNoShow,d.providerUpdatedAt,d.observations,status],
+  );
+  if(!rows[0])return res.status(404).json({error:{message:"Salida no encontrada."}});
+  await audit(req.adminSession.email,"catalog.departure_updated","catalog_product",req.params.id,{departure_id:req.params.departureId});
+  res.json({departure:rows[0]});
+});
+
 app.post("/api/admin/catalog/:id/images", requireAdmin, async (req, res) => {
-  const url = clean(req.body.url); if (!url) return res.status(422).json({ error: { message: "URL de imagen obligatoria." } });
+  const url = clean(req.body.url);
+  if (!url) return res.status(422).json({ error: { message: "URL de imagen obligatoria." } });
   const primary = Boolean(req.body.is_primary), client = await pool.connect();
   try {
     await client.query("BEGIN");
-    if (primary) await client.query(`UPDATE rumbo_catalog_images SET is_primary=false WHERE product_id=$1`,[req.params.id]);
-    const { rows } = await client.query(`INSERT INTO rumbo_catalog_images(product_id,url,alt_text,sort_order,is_primary) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.id,url,clean(req.body.alt_text)||null,Number(req.body.sort_order)||0,primary]);
+    if (primary) await client.query(\`UPDATE rumbo_catalog_images SET is_primary=false WHERE product_id=$1\`,[req.params.id]);
+    const { rows } = await client.query(
+      \`INSERT INTO rumbo_catalog_images(
+         product_id,url,alt_text,title,author_credit,usage_license,sort_order,is_primary,storage_provider,storage_key,bucket_name,provider_updated_at,observations
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12,'')::timestamptz,$13) RETURNING *\`,
+      [req.params.id,url,clean(req.body.alt_text)||null,clean(req.body.title)||null,clean(req.body.author_credit)||null,
+       clean(req.body.usage_license)||null,Number(req.body.sort_order)||0,primary,clean(req.body.storage_provider)||"external",
+       clean(req.body.storage_key)||null,clean(req.body.bucket_name)||null,clean(req.body.provider_updated_at),clean(req.body.observations)||null],
+    );
     await client.query("COMMIT");
     await audit(req.adminSession.email,"catalog.image_created","catalog_product",req.params.id,{image_id:rows[0].id});
     res.status(201).json({ image: rows[0] });
-  } catch(error) { await client.query("ROLLBACK").catch(()=>{}); console.error(error); res.status(500).json({error:{message:"No pudimos agregar la imagen."}}); }
-  finally { client.release(); }
+  } catch(error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    console.error(error);
+    res.status(500).json({error:{message:"No pudimos agregar la imagen."}});
+  } finally { client.release(); }
 });
 
 app.use(async (req, res) => {
