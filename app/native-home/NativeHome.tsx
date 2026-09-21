@@ -56,7 +56,7 @@ export default function NativeHome() {
         }
       }
     } catch {
-      window.localStorage.removeItem(CATALOG_CACHE_KEY);
+      try { window.localStorage.removeItem(CATALOG_CACHE_KEY); } catch {}
     }
 
     const schedule = (attempt: number, delay: number) => {
