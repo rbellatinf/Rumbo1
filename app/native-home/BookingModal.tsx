@@ -9,7 +9,7 @@ const key=()=>crypto.randomUUID();
 const money=(amount:number,currency:string)=>new Intl.NumberFormat("es-PE",{style:"currency",currency,minimumFractionDigits:2,maximumFractionDigits:2}).format(amount);
 const dateLabel=(value?:string)=>value?new Intl.DateTimeFormat("es-PE",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(value+"T12:00:00")):"Por confirmar";
 const emptyTraveller=(passengerType:"adult"|"child"):BookingTraveller=>({passengerType,firstName:"",lastName:"",documentType:"DNI",documentNumber:"",nationalityCode:"PE",dateOfBirth:""});
-type Props={deal:TravelPackage;origin:string;destination:string;departure:string;returnDate:string;adults:number;children:number;onClose:()=>void};
+type Props={deal:TravelPackage;origin:string;destination:string;departure:string;returnDate:string;adults:number;childrenCount:number;onClose:()=>void};
 
 function PolicyList({policies}:{policies?:TravelPolicySet}){
  const rows:[string,string|undefined|null][]=[["Cancelación",policies?.cancellation],["Cambios",policies?.changes],["Reembolsos",policies?.refund],["No show",policies?.noShow]];
@@ -27,7 +27,7 @@ function DepartureChoice({option,selected,onSelect}:{option:TravelDepartureOptio
  </button>;
 }
 
-export default function BookingModal({deal,origin,destination,departure,returnDate,adults,children,onClose}:Props){
+export default function BookingModal({deal,origin,destination,departure,returnDate,adults,childrenCount,onClose}:Props){
  const[step,setStep]=useState(1);
  const departureOptions=useMemo(()=>deal.departures?.filter(item=>item.saleOpen!==false)??[],[deal.departures]);
  const[selectedDepartureId,setSelectedDepartureId]=useState(deal.variantId||departureOptions[0]?.id||"");
@@ -36,20 +36,20 @@ export default function BookingModal({deal,origin,destination,departure,returnDa
  const[result,setResult]=useState<BookingRecord|null>(null),[paymentUrl,setPaymentUrl]=useState("");
  const[travellers,setTravellers]=useState<BookingTraveller[]>(()=>[
   ...Array.from({length:adults},()=>emptyTraveller("adult")),
-  ...Array.from({length:children},()=>emptyTraveller("child")),
+  ...Array.from({length:childrenCount},()=>emptyTraveller("child")),
  ]);
 
  useEffect(()=>{setTravellers(current=>[
   ...Array.from({length:adults},(_,index)=>current[index]?.passengerType==="adult"?current[index]:emptyTraveller("adult")),
-  ...Array.from({length:children},(_,index)=>{const offset=adults+index;return current[offset]?.passengerType==="child"?current[offset]:emptyTraveller("child")}),
- ])},[adults,children]);
+  ...Array.from({length:childrenCount},(_,index)=>{const offset=adults+index;return current[offset]?.passengerType==="child"?current[offset]:emptyTraveller("child")}),
+ ])},[adults,childrenCount]);
 
  useEffect(()=>{
   let active=true;
   if(!nativeDeal(deal)||!deal.providerReference){setError("Este resultado no pertenece al inventario reservable de Rumbo.");setBusy(false);return()=>{active=false}}
   setBusy(true);setError("");
   const selected=departureOptions.find(item=>item.id===selectedDepartureId);
-  const query=new URLSearchParams({productId:deal.providerReference,departureId:selectedDepartureId||deal.variantId||"",departureDate:selected?.departureDate||deal.departureDate||departure,returnDate:selected?.returnDate||deal.returnDate||returnDate,adults:String(adults),children:String(children)});
+  const query=new URLSearchParams({productId:deal.providerReference,departureId:selectedDepartureId||deal.variantId||"",departureDate:selected?.departureDate||deal.departureDate||departure,returnDate:selected?.returnDate||deal.returnDate||returnDate,adults:String(adults),children:String(childrenCount)});
   fetch("/api/availability?"+query,{cache:"no-store"})
    .then(async response=>{const body=await response.json() as {availability?:OfferAvailability;message?:string};if(!response.ok||!body.availability)throw new Error(body.message||"No pudimos comprobar cupos.");return body.availability})
    .then(value=>{if(active){setAvailability(value);setSelectedDepartureId(value.variant_id)}})
@@ -60,7 +60,7 @@ export default function BookingModal({deal,origin,destination,departure,returnDa
 
  const selectedOption=departureOptions.find(item=>item.id===selectedDepartureId);
  const effectivePolicies=availability?.policies||selectedOption?.policies||deal.policies;
- const party=adults+children;
+ const party=adults+childrenCount;
  const updateTraveller=(index:number,patch:Partial<BookingTraveller>)=>setTravellers(current=>current.map((item,itemIndex)=>itemIndex===index?{...item,...patch}:item));
  const travellersComplete=()=>travellers.length===party&&travellers.every(item=>Boolean(item.firstName.trim()&&item.lastName.trim()&&item.documentType?.trim()&&item.documentNumber?.trim()&&item.nationalityCode?.trim()&&item.dateOfBirth));
 
@@ -69,7 +69,7 @@ export default function BookingModal({deal,origin,destination,departure,returnDa
   try{
    const response=await fetch("/api/reservations",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
     idempotencyKey:key(),product:{id:deal.providerReference||deal.id,variantId:availability.variant_id,slug:deal.id,name:deal.destination,provider:"Rumbo",providerReference:deal.providerReference,country:deal.country,price:availability.price_display,image:deal.image,duration:deal.duration,tag:deal.tag,included:deal.included,details:deal.details,policies:effectivePolicies},
-    trip:{originIata:origin,destinationIata:destination,departureDate:availability.departure_date,returnDate:availability.return_date,adults,children},travellers,
+    trip:{originIata:origin,destinationIata:destination,departureDate:availability.departure_date,returnDate:availability.return_date,adults,children:childrenCount},travellers,
     contact:{fullName:name,email,phone,channel:"whatsapp"},consent:true,policiesAccepted:true,website:"",
    })});
    const body=await response.json() as {booking?:BookingRecord;message?:string};if(!response.ok||!body.booking)throw new Error(body.message||"No pudimos crear la reserva.");setResult(body.booking);
@@ -85,7 +85,7 @@ export default function BookingModal({deal,origin,destination,departure,returnDa
    <div className="booking-progress" aria-label="Progreso de reserva">{[["1","Viaje"],["2","Viajeros"],["3","Revisión"]].map(([number,label],index)=><div key={number} className={step>=index+1?"active":""}><span>{step>index+1?<Check/>:number}</span><small>{label}</small></div>)}</div>
    {step===1?<><p className="section-kicker">Tu viaje</p><h2>{deal.destination}</h2>{deal.shortDescription?<p className="booking-lead">{deal.shortDescription}</p>:deal.description?<p className="booking-lead">{deal.description}</p>:null}
     {departureOptions.length>1?<div className="departure-list"><h3>Elige una salida</h3>{departureOptions.map(option=><DepartureChoice key={option.id} option={option} selected={option.id===selectedDepartureId} onSelect={()=>setSelectedDepartureId(option.id)}/>)}</div>:null}
-    <div className="booking-summary-grid"><div><CalendarDays/><span><small>Fechas</small><strong>{dateLabel(availability?.departure_date||selectedOption?.departureDate||deal.departureDate)} → {dateLabel(availability?.return_date||selectedOption?.returnDate||deal.returnDate)}</strong></span></div><div><Users/><span><small>Viajeros</small><strong>{adults+" adulto"+(adults===1?"":"s")+(children?" · "+children+" niño"+(children===1?"":"s"):"")}</strong></span></div><div><ShieldCheck/><span><small>Confirmación</small><strong>{availability?.confirmation_label||selectedOption?.confirmationLabel||deal.rating}</strong></span></div></div>
+    <div className="booking-summary-grid"><div><CalendarDays/><span><small>Fechas</small><strong>{dateLabel(availability?.departure_date||selectedOption?.departureDate||deal.departureDate)} → {dateLabel(availability?.return_date||selectedOption?.returnDate||deal.returnDate)}</strong></span></div><div><Users/><span><small>Viajeros</small><strong>{adults+" adulto"+(adults===1?"":"s")+(childrenCount?" · "+childrenCount+" niño"+(childrenCount===1?"":"s"):"")}</strong></span></div><div><ShieldCheck/><span><small>Confirmación</small><strong>{availability?.confirmation_label||selectedOption?.confirmationLabel||deal.rating}</strong></span></div></div>
     {deal.included.length?<div className="booking-included"><h3>Incluye</h3><ul>{deal.included.map(item=><li key={item}><Check/>{item}</li>)}</ul></div>:null}
     <div className="booking-price-box"><span><small>Precio final por persona</small><strong>{availability?money(availability.price_amount,availability.currency):deal.price}</strong>{availability?.taxes_amount!=null?<small>Incluye {money(availability.taxes_amount,availability.currency)} de impuestos/tasas por persona</small>:null}</span><span><small>{"Total "+party+" viajero"+(party===1?"":"s")}</small><strong>{availability?money(availability.total_amount,availability.currency):"Calculando…"}</strong></span></div>
     <div className="booking-policies"><h3>Condiciones importantes</h3><PolicyList policies={effectivePolicies}/></div>{error?<p className="booking-error" role="alert">{error}</p>:null}
