@@ -135,7 +135,43 @@ export default function CatalogPanel() {
     return list;
   }
 
-  useEffect(() => { load().catch((e) => setError(e instanceof Error ? e.message : "No pudimos cargar el catálogo.")); }, []);
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const retryDelays = [2500, 5000, 10000, 20000, 30000];
+
+    async function refresh(attempt = 0) {
+      try {
+        const response = await fetch("/api/admin/catalog", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || "No pudimos cargar el catálogo.");
+        if (!active) return;
+        setProducts((payload.products || []) as Product[]);
+        setError("");
+        timer = window.setTimeout(() => void refresh(0), 5 * 60 * 1000);
+      } catch (reason) {
+        if (!active) return;
+        const message = reason instanceof Error ? reason.message : "No pudimos cargar el catálogo.";
+        setError(`${message} Reintentando automáticamente…`);
+        const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)];
+        timer = window.setTimeout(() => void refresh(attempt + 1), delay);
+      }
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (timer) window.clearTimeout(timer);
+      void refresh(0);
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    void refresh(0);
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   const providers = useMemo(() => Array.from(new Set(products.map((item) => item.provider).filter(Boolean))) as string[], [products]);
   const rows = useMemo(() => {
