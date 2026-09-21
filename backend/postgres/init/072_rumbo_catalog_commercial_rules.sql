@@ -37,7 +37,9 @@ ALTER TABLE rumbo_catalog_departures
 CREATE INDEX IF NOT EXISTS rumbo_catalog_departures_sale_deadline_idx
   ON rumbo_catalog_departures(sale_deadline, status);
 
-CREATE OR REPLACE VIEW rumbo_catalog_departure_commercial AS
+DROP VIEW IF EXISTS rumbo_catalog_departure_commercial;
+
+CREATE VIEW rumbo_catalog_departure_commercial AS
 SELECT
   d.*,
   (d.price_amount - COALESCE(d.cost_amount, d.price_amount))::numeric(12,2) AS margin_amount,
