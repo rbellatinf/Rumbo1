@@ -1,11 +1,9 @@
 name: Verify live Rumbo platform
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17,47 * * * *"
 
 permissions:
   contents: read
