@@ -9,3 +9,21 @@ test("native backend owns external package, booking and payment routes",async()=
 test("AirLabs runtime protects quota and has data-backed degradation",async()=>{const route=await read("backend/rumbo-api/src/airlabs-runtime-routes.mjs"),migration=await read("backend/postgres/init/106_rumbo_airport_search_cache.sql"),field=await read("app/native-home/AirportField.tsx");assert.match(route,/rumbo_airport_search_cache/);assert.match(route,/minute_limit_exceeded/);assert.match(route,/hour_limit_exceeded/);assert.match(route,/month_limit_exceeded/);assert.match(route,/catalogFallback/);assert.match(route,/\/suggest\?/);assert.match(migration,/expires_at/);assert.match(field,/650/);assert.match(field,/keyword\.length<3/)});
 test("sample catalog can rotate dates without enabling other test identities",async()=>{const prepare=await read("backend/rumbo-api/scripts/prepare-db.mjs"),seed=await read("backend/postgres/init/101_rumbo_test_catalog_seed.sql");assert.match(prepare,/RUMBO_LOAD_SAMPLE_CATALOG/);assert.match(prepare,/101_rumbo_test_catalog_seed\.sql/);assert.match(prepare,/102_rumbo_world_test_catalog_seed\.sql/);assert.doesNotMatch(prepare,/103_rumbo_test_user_credentials\.sql/);assert.match(seed,/current_date\+45/);assert.match(seed,/ON CONFLICT \(id\) DO UPDATE/)});
 test("catalog galleries expose ordered images and accessible carousel controls",async()=>{const backend=await read("backend/rumbo-api/src/gateway.mjs"),adminRoutes=await read("backend/rumbo-api/src/user-management-routes.mjs"),catalog=await read("app/api/catalog/route.ts"),packages=await read("app/api/packages/route.ts"),carousel=await read("app/components/PackageImageCarousel.tsx"),admin=await read("app/admin/CatalogPanel.tsx");assert.match(backend,/jsonb_agg\(jsonb_build_object\([\s\S]*'is_primary'/);assert.match(backend,/image_gallery\.images/);assert.match(adminRoutes,/patch\('\/api\/admin\/catalog\/:id\/images\/:imageId'/);assert.match(catalog,/images:images\.length\?images:undefined/);assert.match(packages,/images:images\.length\?images:undefined/);assert.match(carousel,/aria-roledescription="carrusel"/);assert.match(carousel,/ArrowLeft/);assert.match(carousel,/onTouchEnd/);assert.match(admin,/type="file" multiple/);assert.match(admin,/Usar de portada/)});
+
+test("catalog cold-start resilience and deployment gates stay enabled",async()=>{
+  const [home,adminRoute,adminPanel,render,ci]=await Promise.all([
+    read("app/native-home/NativeHome.tsx"),
+    read("app/api/admin/catalog/route.ts"),
+    read("app/admin/CatalogPanel.tsx"),
+    read("render.yaml"),
+    read(".github/workflows/ci.yml")
+  ]);
+  assert.match(home,/rumbo:last-good-catalog:v1/);
+  assert.match(home,/CATALOG_RETRY_DELAYS/);
+  assert.match(home,/Reintentando autom[aá]ticamente/);
+  assert.match(adminRoute,/fetchRumboApi\(provider, `\/api\/admin\/catalog/);
+  assert.match(adminPanel,/Reintentando autom[aá]ticamente/);
+  assert.equal((render.match(/autoDeployTrigger:\s*checksPass/g)||[]).length,2);
+  assert.match(ci,/storefront:\s*\n\s*needs:\s*database-migrations/);
+  assert.match(ci,/database-migrations:\s*\n\s*needs:\s*backend-syntax/);
+});
