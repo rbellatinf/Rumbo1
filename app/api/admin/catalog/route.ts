@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { accessConfiguration, backendMessage, demoMode, noStoreJson, parseJson, providerHeaders, RUMBO_SESSION_COOKIE } from "../../../../lib/rumbo-access";
+import { accessConfiguration, backendMessage, demoMode, fetchRumboApi, noStoreJson, parseJson, providerHeaders, RUMBO_SESSION_COOKIE } from "../../../../lib/rumbo-access";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const token = request.cookies.get(RUMBO_SESSION_COOKIE)?.value;
   if (!token && !demoMode()) return noStoreJson({ message: "No hay sesión administrativa." }, 401);
   const sort = request.nextUrl.searchParams.get("sort") === "margin" ? "margin" : "recent";
-  const upstream = await fetch(`${provider.apiUrl}/api/admin/catalog?sort=${sort}`, { headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }), cache: "no-store" });
+  const upstream = await fetchRumboApi(provider, `/api/admin/catalog?sort=${sort}`, { headers: providerHeaders(provider, { token, demoRole: "wholesaler_admin" }), cache: "no-store" }, { attempts: 8, timeoutMs: 15000 });
   const payload = await parseJson(upstream);
   if (!upstream.ok) return noStoreJson({ message: backendMessage(payload, "No pudimos cargar el catálogo.") }, upstream.status || 502);
   return noStoreJson(payload);
