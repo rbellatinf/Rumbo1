@@ -56,7 +56,7 @@ export default function BookingModal({deal,origin,destination,departure,returnDa
    .catch(reason=>{if(active){setAvailability(null);setError(reason instanceof Error?reason.message:"No pudimos comprobar cupos.")}})
    .finally(()=>{if(active)setBusy(false)});
   return()=>{active=false};
- },[deal,departure,returnDate,selectedDepartureId,departureOptions,adults,children]);
+ },[deal,departure,returnDate,selectedDepartureId,departureOptions,adults,childrenCount]);
 
  const selectedOption=departureOptions.find(item=>item.id===selectedDepartureId);
  const effectivePolicies=availability?.policies||selectedOption?.policies||deal.policies;
