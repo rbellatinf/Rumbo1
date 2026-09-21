@@ -57,6 +57,13 @@ ALTER TABLE rumbo_catalog_source_links
   ADD COLUMN IF NOT EXISTS technical_ids jsonb NOT NULL DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS observations text;
 
+ALTER TABLE rumbo_catalog_product_tags
+  ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS observations text;
+
+CREATE INDEX IF NOT EXISTS rumbo_catalog_product_tags_sort_idx
+  ON rumbo_catalog_product_tags(product_id,sort_order,tag_id);
+
 CREATE TABLE IF NOT EXISTS rumbo_catalog_package_details (
   product_id uuid PRIMARY KEY REFERENCES rumbo_catalog_products(id) ON DELETE CASCADE,
   origin_iata char(3),
