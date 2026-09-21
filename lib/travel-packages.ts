@@ -6,6 +6,51 @@ export type TravelPackageImage = {
   isPrimary?: boolean;
 };
 
+export type TravelPolicySet = {
+  cancellation?: string | null;
+  changes?: string | null;
+  refund?: string | null;
+  noShow?: string | null;
+};
+
+export type TravelTag = {
+  id?: string;
+  code?: string;
+  name: string;
+  type?: string;
+  sortOrder?: number;
+};
+
+export type TravelDepartureOption = {
+  id: string;
+  originIata?: string;
+  departureDate?: string;
+  returnDate?: string;
+  currency: string;
+  priceAmount: number;
+  taxesAmount?: number | null;
+  suggestedPriceAmount?: number | null;
+  capacity?: number | null;
+  availableCapacity?: number | null;
+  lowStockThreshold?: number | null;
+  saleDeadline?: string | null;
+  saleTimezone?: string | null;
+  minPassengers?: number;
+  maxPassengers?: number;
+  confirmationMode?: "confirmed" | "minimum_required";
+  minimumGroupSize?: number | null;
+  confirmationLabel?: string;
+  saleOpen?: boolean;
+  policies?: TravelPolicySet;
+};
+
+export type TravelProductDetails = {
+  package?: Record<string, unknown> | null;
+  hotels?: Array<Record<string, unknown>>;
+  flights?: Array<Record<string, unknown>>;
+  experiences?: Array<Record<string, unknown>>;
+};
+
 export type TravelPackage = {
   id: string;
   destination: string;
@@ -32,6 +77,15 @@ export type TravelPackage = {
   originIata?: string;
   lowStock?: boolean;
   activeDepartureCount?: number;
+  productType?: "package" | "hotel" | "flight" | "experience" | "other";
+  shortDescription?: string;
+  description?: string;
+  destinationIata?: string;
+  countryCode?: string;
+  policies?: TravelPolicySet;
+  departures?: TravelDepartureOption[];
+  tags?: TravelTag[];
+  details?: TravelProductDetails;
 };
 
 export const demoTravelPackages: TravelPackage[] = [
