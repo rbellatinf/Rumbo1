@@ -24,6 +24,8 @@ export default function NativeHome() {
   const [destinationCode, setDestinationCode] = useState("CUZ");
   const [departure, setDeparture] = useState(() => dateFromNow(45));
   const [returnDate, setReturnDate] = useState(() => dateFromNow(52));
+  const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
   const [deals, setDeals] = useState<TravelPackage[]>([]);
   const [state, setState] = useState<SourceState>("loading");
   const [airportState, setAirportState] = useState<SourceState>("idle");
@@ -112,7 +114,8 @@ export default function NativeHome() {
         destinationName: destination.replace(/\s*\([A-Z]{3}\).*$/i, ""),
         departureDate: departure,
         returnDate,
-        adults: "2",
+        adults: String(adults),
+        children: String(children),
       });
       const response = await fetch(`/api/packages?${query}`, { cache: "no-store" });
       const body = (await response.json()) as { provider?: string; packages?: TravelPackage[]; message?: string };
@@ -161,7 +164,8 @@ export default function NativeHome() {
             destination={destination}
             departureDate={departure}
             returnDate={returnDate}
-            travellers={2}
+            adults={adults}
+            children={children}
             searching={searching}
             airportState={airportState}
             packageState={state}
@@ -179,6 +183,8 @@ export default function NativeHome() {
             onSwap={swap}
             onDeparture={setDeparture}
             onReturn={setReturnDate}
+            onAdults={setAdults}
+            onChildren={setChildren}
             onAirportState={setAirportState}
             onSearch={search}
           />
@@ -213,6 +219,8 @@ export default function NativeHome() {
           destination={destinationCode}
           departure={departure}
           returnDate={returnDate}
+          adults={adults}
+          children={children}
           onClose={() => setSelected(null)}
         />
       ) : null}
