@@ -2,11 +2,12 @@ name: Validate Rumbo
 on:
   pull_request:
   push:
-    branches: [main, "agent/**"]
+    branches: [main, "agent/**", "feat/**", "fix/**"]
 permissions:
   contents: read
 jobs:
   storefront:
+    needs: database-migrations
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,6 +45,7 @@ jobs:
           test ! -f lib/izipay.ts
           ! grep -R -E 'SPREE_API_URL|X-Spree-API-Key|api/v3/store' app/api/catalog app/api/availability app/api/packages app/api/reservations app/api/payments app/pagar app/native-home lib/pricetravel-packages.ts lib/rumbo-payment-api.ts backend/rumbo-api/src/native-front.mjs backend/rumbo-api/src/native-runtime-routes.mjs backend/rumbo-api/src/runtime-integration-config.mjs render.yaml compose.yaml
   database-migrations:
+    needs: backend-syntax
     runs-on: ubuntu-latest
     timeout-minutes: 12
     services:
