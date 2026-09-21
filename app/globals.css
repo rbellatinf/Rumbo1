@@ -1667,3 +1667,94 @@ textarea:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Rumbo catalog contract v2 · traveller picker and E2E checkout */
+.traveller-picker{position:relative;min-width:0}
+.traveller-picker>.search-field{width:100%;height:100%}
+.traveller-popover{position:absolute;z-index:30;top:calc(100% + 12px);right:0;width:320px;padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--white);box-shadow:0 20px 50px rgba(6,28,51,.18)}
+.traveller-popover>div{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 0}
+.traveller-popover>div+div{border-top:1px solid var(--line)}
+.traveller-popover span{display:grid;gap:2px;color:var(--navy)}
+.traveller-popover small{color:var(--slate);font-size:11px;font-weight:500}
+.traveller-stepper{display:flex;align-items:center;gap:10px}
+.traveller-stepper button{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:white;color:var(--navy)}
+.traveller-stepper button:disabled{opacity:.35}
+.traveller-stepper svg{width:14px}
+.traveller-stepper strong{min-width:22px;text-align:center}
+.traveller-done{width:100%;min-height:40px;margin-top:8px;border:0;border-radius:10px;background:var(--navy);color:white;font-weight:750}
+
+.booking-modal-v2{width:min(820px,100%)}
+.booking-modal-v2 .booking-step{text-align:left}
+.booking-modal-v2 h2{margin:5px 0 10px;color:var(--navy);font-size:30px;letter-spacing:-.03em}
+.booking-lead,.booking-muted{margin:0 0 20px;color:var(--slate);line-height:1.6}
+.booking-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:-18px 0 30px}
+.booking-progress>div{display:flex;align-items:center;gap:8px;color:#98a2b3;font-size:11px;font-weight:700}
+.booking-progress>div::after{content:"";height:2px;flex:1;background:#e8edf2}
+.booking-progress>div:last-child::after{display:none}
+.booking-progress span{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#eef2f5;color:#667085}
+.booking-progress svg{width:14px}
+.booking-progress .active{color:var(--navy)}
+.booking-progress .active span{background:var(--coral);color:white}
+.booking-progress .active::after{background:#ffc5b7}
+.departure-list{display:grid;gap:9px;margin:22px 0}
+.departure-list h3,.booking-included h3,.booking-policies h3{margin:0 0 9px;color:var(--navy);font-size:14px}
+.departure-choice{width:100%;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);border-radius:13px;background:white;text-align:left;color:var(--ink)}
+.departure-choice:hover,.departure-choice.selected{border-color:var(--coral);background:#fff8f5}
+.departure-choice>span:nth-child(2),.departure-choice>span:last-child{display:grid;gap:3px}
+.departure-choice>span:last-child{text-align:right}
+.departure-choice small{color:var(--slate);font-size:11px}
+.departure-radio{width:18px;height:18px;border:2px solid #cbd5e1;border-radius:50%}
+.departure-choice.selected .departure-radio{border:5px solid var(--coral)}
+.booking-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:20px 0}
+.booking-summary-grid>div{display:flex;gap:10px;padding:13px;border-radius:12px;background:#f8fafc}
+.booking-summary-grid svg{width:18px;flex:0 0 auto;color:var(--coral)}
+.booking-summary-grid span{display:grid;gap:3px}
+.booking-summary-grid small{color:var(--slate);font-size:10px}
+.booking-summary-grid strong{color:var(--navy);font-size:12px;line-height:1.35}
+.booking-included{margin:20px 0}
+.booking-included ul{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.booking-included li{display:flex;gap:7px;align-items:flex-start;color:var(--slate);font-size:12px}
+.booking-included svg{width:16px;color:#2f9d77}
+.booking-price-box{display:flex;justify-content:space-between;gap:20px;margin:22px 0;padding:18px;border-radius:14px;background:var(--navy);color:white}
+.booking-price-box span{display:grid;gap:3px}
+.booking-price-box span:last-child{text-align:right}
+.booking-price-box small{color:rgba(255,255,255,.68);font-size:10px}
+.booking-price-box strong{font-size:22px}
+.booking-policies{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fbfcfd}
+.booking-policy-list{display:grid;gap:10px}
+.booking-policy-list>div{display:grid;grid-template-columns:110px 1fr;gap:12px}
+.booking-policy-list strong{color:var(--navy);font-size:11px}
+.booking-policy-list span{color:var(--slate);font-size:11px;line-height:1.45}
+.traveller-list{display:grid;gap:14px;margin:20px 0}
+.traveller-card{margin:0;padding:16px;border:1px solid var(--line);border-radius:14px}
+.traveller-card legend{padding:0 6px;color:var(--navy);font-size:12px;font-weight:800}
+.booking-fields-v2{grid-template-columns:repeat(3,minmax(0,1fr));margin:6px 0 0}
+.booking-fields-v2 select{appearance:auto}
+.booking-actions{display:flex;justify-content:space-between;gap:12px;margin-top:20px}
+.booking-actions .booking-primary{width:auto;flex:1}
+.booking-secondary{min-height:52px;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 18px;border:1px solid var(--line);border-radius:12px;background:white;color:var(--navy);font-weight:750}
+.booking-secondary svg{width:17px}
+.booking-review{display:flex;justify-content:space-between;gap:24px;margin:20px 0;padding:18px;border-radius:14px;background:#f8fafc}
+.booking-review>div{display:grid;gap:4px}
+.booking-review>div:last-child{text-align:right}
+.booking-review span,.booking-review small{color:var(--slate);font-size:11px}
+.booking-review strong{color:var(--navy)}
+.booking-success{text-align:center!important}
+.booking-success>p{max-width:560px;margin-inline:auto}
+
+@media(max-width:760px){
+ .traveller-picker{width:100%}
+ .traveller-popover{position:relative;top:0;right:auto;width:100%;margin:8px 0 12px;box-shadow:none}
+ .booking-modal-v2{width:100%}
+ .booking-progress{margin-top:-8px}
+ .booking-progress small{display:none}
+ .booking-summary-grid{grid-template-columns:1fr}
+ .booking-included ul{grid-template-columns:1fr}
+ .booking-price-box,.booking-review{flex-direction:column}
+ .booking-price-box span:last-child,.booking-review>div:last-child{text-align:left}
+ .booking-fields-v2{grid-template-columns:1fr}
+ .booking-policy-list>div{grid-template-columns:1fr;gap:3px}
+ .booking-actions{flex-direction:column-reverse}
+ .booking-actions .booking-primary{width:100%}
+}
