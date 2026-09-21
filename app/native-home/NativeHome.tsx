@@ -14,7 +14,9 @@ function dateFromNow(days: number) {
   return value.toISOString().slice(0, 10);
 }
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const CATALOG_CACHE_KEY = "rumbo:last-good-catalog:v1";
+const CATALOG_RETRY_DELAYS = [2500, 5000, 10000, 20000, 30000];
+const CATALOG_REFRESH_MS = 5 * 60 * 1000;
 
 export default function NativeHome() {
   const [activeProduct, setActiveProduct] = useState<ProductType>("packages");
@@ -36,39 +38,84 @@ export default function NativeHome() {
 
   useEffect(() => {
     let active = true;
+    let timer: number | undefined;
+    let hasUsableCatalog = false;
 
-    async function loadCatalog() {
-      let lastError = "No pudimos consultar el catálogo.";
-      for (let attempt = 0; attempt < 4 && active; attempt += 1) {
-        if (attempt > 0) {
-          setState("loading");
-          setMessage("Rumbo API está iniciando; reconectando al catálogo real…");
-          await sleep([2500, 4500, 7000][Math.min(attempt - 1, 2)]);
-        }
-        try {
-          const response = await fetch("/api/catalog", { cache: "no-store" });
-          const body = (await response.json()) as { packages?: TravelPackage[]; message?: string };
-          if (!response.ok) throw new Error(body.message || `Catálogo respondió HTTP ${response.status}`);
-          if (!active) return;
-          setDeals(Array.isArray(body.packages) ? body.packages : []);
+    try {
+      const cached = window.localStorage.getItem(CATALOG_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { packages?: TravelPackage[]; savedAt?: number };
+        if (Array.isArray(parsed.packages) && parsed.packages.length > 0) {
+          hasUsableCatalog = true;
+          setDeals(parsed.packages);
           setState("live");
           setProvider("Rumbo");
-          setMessage(body.message || "Catálogo nativo conectado.");
-          setError("");
-          return;
-        } catch (reason) {
-          lastError = reason instanceof Error ? reason.message : "No pudimos consultar el catálogo.";
+          setMessage("Mostrando el último catálogo disponible mientras validamos la conexión en vivo…");
         }
       }
-      if (!active) return;
-      setState("error");
-      setMessage(lastError);
-      setError(lastError);
+    } catch {
+      window.localStorage.removeItem(CATALOG_CACHE_KEY);
     }
 
-    void loadCatalog();
+    const schedule = (attempt: number, delay: number) => {
+      if (!active) return;
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void loadCatalog(attempt), delay);
+    };
+
+    async function loadCatalog(attempt = 0) {
+      if (!active) return;
+      try {
+        const response = await fetch("/api/catalog", { cache: "no-store" });
+        const body = (await response.json()) as { packages?: TravelPackage[]; message?: string };
+        if (!response.ok) throw new Error(body.message || `Catálogo respondió HTTP ${response.status}`);
+        const packages = Array.isArray(body.packages) ? body.packages : [];
+        if (!packages.length) throw new Error("El catálogo respondió sin productos; lo volveremos a consultar.");
+
+        if (!active) return;
+        hasUsableCatalog = true;
+        setDeals(packages);
+        setState("live");
+        setProvider("Rumbo");
+        setMessage(body.message || "Catálogo nativo conectado.");
+        setError("");
+        try {
+          window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({ packages, savedAt: Date.now() }));
+        } catch {
+          // El catálogo vivo sigue siendo usable aunque el navegador no permita cache local.
+        }
+        schedule(0, CATALOG_REFRESH_MS);
+      } catch (reason) {
+        if (!active) return;
+        const text = reason instanceof Error ? reason.message : "No pudimos consultar el catálogo.";
+        if (hasUsableCatalog) {
+          setState("live");
+          setMessage("El API todavía está iniciando. Conservamos el último catálogo y reintentaremos automáticamente.");
+          setError("");
+        } else {
+          setState(attempt >= 2 ? "error" : "loading");
+          setMessage(`${text} Reintentando automáticamente…`);
+          setError(attempt >= 2 ? text : "");
+        }
+        const delay = CATALOG_RETRY_DELAYS[Math.min(attempt, CATALOG_RETRY_DELAYS.length - 1)];
+        schedule(attempt + 1, delay);
+      }
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (timer) window.clearTimeout(timer);
+        void loadCatalog(0);
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    void loadCatalog(0);
+
     return () => {
       active = false;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
