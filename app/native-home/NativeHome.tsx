@@ -209,7 +209,7 @@ export default function NativeHome() {
             departureDate={departure}
             returnDate={returnDate}
             adults={adults}
-            children={children}
+            childrenCount={children}
             searching={searching}
             airportState={airportState}
             packageState={state}
@@ -264,7 +264,7 @@ export default function NativeHome() {
           departure={departure}
           returnDate={returnDate}
           adults={adults}
-          children={children}
+          childrenCount={children}
           onClose={() => setSelected(null)}
         />
       ) : null}
