@@ -100,6 +100,6 @@ export async function GET(){
     const response=await fetchRumboApi(provider,"/api/catalog");
     const payload=await parseJson(response) as {products?:NativeProduct[]};
     if(!response.ok||!Array.isArray(payload.products))return NextResponse.json({mode:"error",packages:[],message:backendMessage(payload as Record<string,unknown>,"No pudimos leer el catálogo nativo de Rumbo.")},{status:response.ok?502:response.status,headers:{"Cache-Control":"no-store"}});
-    return NextResponse.json({mode:"live",packages:payload.products.map(toPackage),message:`Catálogo propio de Rumbo conectado a PostgreSQL (${payload.products.length} producto${payload.products.length===1?"":"s"}).`},{headers:{"Cache-Control":"private, max-age=30"}});
+    return NextResponse.json({mode:"live",deploymentCommit:process.env.RENDER_GIT_COMMIT||null,packages:payload.products.map(toPackage),message:`Catálogo propio de Rumbo conectado a PostgreSQL (${payload.products.length} producto${payload.products.length===1?"":"s"}).`},{headers:{"Cache-Control":"private, max-age=30"}});
   }catch(error){return NextResponse.json({mode:"error",packages:[],message:error instanceof Error?`Rumbo API no respondió: ${error.message}`:"Rumbo API no respondió."},{status:502,headers:{"Cache-Control":"no-store"}})}
 }
