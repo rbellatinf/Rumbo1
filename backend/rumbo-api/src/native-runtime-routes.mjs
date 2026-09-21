@@ -13,7 +13,36 @@ function sha256(v){return crypto.createHash("sha256").update(v).digest("hex")}
 function publicUrl(){return clean(process.env.RUMBO_PUBLIC_URL||process.env.RUMBO_STOREFRONT_URL||"https://rumbo-storefront.onrender.com").replace(/\/$/,"")}
 function checkoutSecret(){return clean(process.env.RUMBO_PAYMENT_CHECKOUT_SECRET)}
 function canonicalCheckout(values){return new URLSearchParams(Object.entries(values).sort(([a],[b])=>a.localeCompare(b))).toString()}
-function bookingJson(row){if(!row)return null;return{id:row.id,reference:row.reference,status:row.status,product_name:row.product_name,country:row.country,departure_date:row.departure_date,return_date:row.return_date,adults:Number(row.adults),children:Number(row.children),contact_channel:row.contact_channel,unit_price_amount:row.unit_price_amount==null?null:Number(row.unit_price_amount),total_amount:row.total_amount==null?null:Number(row.total_amount),price_display:row.price_display,currency:row.currency,remaining_capacity:row.available_capacity==null?null:Number(row.available_capacity),payment_status:row.payment_status||null,payment_url:row.payment_url||null,hold_expires_at:row.hold_expires_at,created_at:row.created_at,updated_at:row.updated_at}}
+function bookingJson(row){
+  if(!row)return null;
+  return {
+    id:row.id,
+    reference:row.reference,
+    status:row.status,
+    product_name:row.product_name,
+    country:row.country,
+    departure_date:row.departure_date,
+    return_date:row.return_date,
+    adults:Number(row.adults),
+    children:Number(row.children),
+    contact_channel:row.contact_channel,
+    unit_price_amount:row.unit_price_amount==null?null:Number(row.unit_price_amount),
+    total_amount:row.total_amount==null?null:Number(row.total_amount),
+    price_display:row.price_display,
+    currency:row.currency,
+    remaining_capacity:row.available_capacity==null?null:Number(row.available_capacity),
+    payment_status:row.payment_status||null,
+    payment_url:row.payment_url||null,
+    hold_expires_at:row.hold_expires_at,
+    pricing_snapshot:row.pricing_snapshot||{},
+    policy_snapshot:row.policy_snapshot||{},
+    traveller_snapshot:Array.isArray(row.traveller_snapshot)?row.traveller_snapshot:[],
+    policies_accepted_at:row.policies_accepted_at||null,
+    created_at:row.created_at,
+    updated_at:row.updated_at
+  };
+}
+
 async function bookingRow(db,reference,email){const values=[reference];let where="b.reference=$1";if(email){values.push(email);where+=" AND lower(b.contact_email)=$2"}const {rows}=await db.query(`SELECT b.*,p.id AS payment_id,p.provider AS payment_provider,p.provider_payment_id,p.status AS payment_status,p.amount AS payment_amount,p.currency AS payment_currency,p.payment_url,p.checkout_expires_at,d.available_capacity FROM rumbo_booking_requests b LEFT JOIN rumbo_booking_payments p ON p.booking_request_id=b.id LEFT JOIN rumbo_catalog_departures d ON d.id=b.catalog_departure_id WHERE ${where} LIMIT 1`,values);return rows[0]||null}
 async function applyPaidCommission(client,booking){if(!booking.referral_code||booking.total_amount==null||!booking.currency)return;const partner=(await client.query(`SELECT p.account_id,p.associate_id,p.referral_code,p.sponsor_partner_id FROM rumbo_partner_profiles p WHERE p.referral_code=$1 LIMIT 1`,[booking.referral_code])).rows[0];if(!partner?.associate_id)return;const settings=(await client.query(`SELECT partner_rate,sponsor_rate FROM rumbo_global_commission_settings WHERE id=1`)).rows[0]||{partner_rate:.06,sponsor_rate:0};const {rows}=await client.query(`INSERT INTO rumbo_sale_attributions(spree_order_id,associate_id,referral_code,currency,gross_amount,payment_status,booking_request_id,source_channel,referred_partner_id,confirmed_at) VALUES($1,$2,$3,$4,$5,'confirmed',$6,'partner',$7,now()) ON CONFLICT(booking_request_id) WHERE booking_request_id IS NOT NULL DO UPDATE SET payment_status='confirmed',gross_amount=EXCLUDED.gross_amount,currency=EXCLUDED.currency,confirmed_at=COALESCE(rumbo_sale_attributions.confirmed_at,now()) RETURNING id`,[booking.reference,partner.associate_id,partner.referral_code,booking.currency,booking.total_amount,booking.id,partner.account_id]);const attribution=rows[0];for(const [type,id,rateRaw] of [["partner",partner.account_id,settings.partner_rate],["sponsor",partner.sponsor_partner_id,settings.sponsor_rate]]){const rate=Number(rateRaw||0);if(!id||rate<=0)continue;const amount=Math.round(Number(booking.total_amount)*rate*100)/100;await client.query(`INSERT INTO rumbo_commissions(sale_attribution_id,rate,base_amount,commission_amount,currency,status,approved_by,approved_at,beneficiary_type,beneficiary_id) VALUES($1,$2,$3,$4,$5,'approved','payment_webhook',now(),$6,$7) ON CONFLICT(sale_attribution_id,beneficiary_type,beneficiary_id) WHERE beneficiary_id IS NOT NULL DO NOTHING`,[attribution.id,rate,booking.total_amount,amount,booking.currency,type,id])}}
 async function reverseCommission(client,bookingId){const {rows}=await client.query(`UPDATE rumbo_sale_attributions SET payment_status='refunded' WHERE booking_request_id=$1 RETURNING id`,[bookingId]);if(rows[0])await client.query(`UPDATE rumbo_commissions SET status='reversed',updated_at=now() WHERE sale_attribution_id=$1 AND status NOT IN('rejected','reversed')`,[rows[0].id])}
@@ -22,7 +51,186 @@ function normalizeIzipay(answerRaw){const answer=JSON.parse(answerRaw),details=a
 export function installNativeRuntimeRoutes(app,{pool}){
   app.get('/api/integrations/pricetravel/packages',async(req,res)=>{const origin=clean(req.query.origin).toUpperCase(),destination=clean(req.query.destination).toUpperCase(),departureDate=clean(req.query.departureDate),returnDate=clean(req.query.returnDate),adults=Number(req.query.adults||2),currency=clean(req.query.currency||'USD').toUpperCase();if(!IATA.test(origin)||!IATA.test(destination)||!/^\d{4}-\d{2}-\d{2}$/.test(departureDate)||!/^\d{4}-\d{2}-\d{2}$/.test(returnDate)||!Number.isInteger(adults)||adults<1||adults>18)return res.status(422).json({error:{message:'Parámetros de búsqueda inválidos.'}});try{const cfg=await resolvedRuntimeConfig(pool,'pricetravel');if(!cfg?.configured)return res.status(503).json({error:{message:'PriceTravel no está configurado en Administración → APIs.'}});const path=clean(cfg.publicConfig.packages_path),endpoint=path.startsWith('/')?path:`/${path}`,query=new URLSearchParams({originAirportCode:origin,destinationAirportCode:destination,departureDate,returnDate,adults:String(adults),currency,language:'es-PE'}),authorization=Buffer.from(`${cfg.secrets.username}:${cfg.secrets.password}`).toString('base64');const response=await fetch(`${clean(cfg.publicConfig.api_url).replace(/\/$/,'')}${endpoint}?${query}`,{headers:{accept:'application/json',authorization:`Basic ${authorization}`},cache:'no-store',signal:AbortSignal.timeout(15000)}),text=await response.text();let payload={};try{payload=text?JSON.parse(text):{}}catch{payload={error:{message:text.slice(0,300)}}}if(!response.ok)return res.status(response.status).json({error:{message:payload?.error?.message||`PriceTravel respondió HTTP ${response.status}.`}});return res.json(payload)}catch(error){console.error(error);return res.status(502).json({error:{message:error instanceof Error?error.message:'PriceTravel no respondió.'}})}});
 
-  app.post('/api/bookings',async(req,res)=>{const body=rawJson(req);if(!body)return res.status(400).json({error:{message:'Formulario inválido.'}});const idempotency=clean(body.idempotency_key),productId=clean(body.catalog_product_id||body.rumbo_product_id),departureId=clean(body.catalog_departure_id||body.variant_id),email=clean(body.contact_email).toLowerCase(),name=clean(body.contact_name),phone=clean(body.contact_phone),adults=Number(body.adults||1),children=Number(body.children||0),travellers=adults+children,referral=clean(body.referral_code).toUpperCase(),origin=clean(body.origin_iata).toUpperCase();if(!UUID.test(idempotency)||!UUID.test(productId)||!UUID.test(departureId)||!email||!name||!phone||!Number.isInteger(adults)||!Number.isInteger(children)||adults<1||children<0||travellers>18)return res.status(422).json({error:{message:'La solicitud de reserva está incompleta.'}});try{const existing=(await pool.query(`SELECT reference FROM rumbo_booking_requests WHERE idempotency_key=$1::uuid LIMIT 1`,[idempotency])).rows[0];if(existing)return res.json(bookingJson(await bookingRow(pool,existing.reference)));if(referral){const valid=await pool.query(`SELECT 1 FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.referral_code=$1 AND a.status='active'`,[referral]);if(!valid.rowCount)return res.status(422).json({error:{message:'El enlace del Partner ya no es válido.'}})}const client=await pool.connect();try{await client.query('BEGIN');const product=(await client.query(`SELECT * FROM rumbo_catalog_products WHERE id=$1::uuid AND status='published' FOR SHARE`,[productId])).rows[0];if(!product){await client.query('ROLLBACK');return res.status(404).json({error:{message:'El producto ya no está disponible.'}})}const departure=(await client.query(`SELECT * FROM rumbo_catalog_departures WHERE id=$1::uuid AND product_id=$2::uuid AND status='active' AND (sale_deadline IS NULL OR sale_deadline>=now()) FOR UPDATE`,[departureId,productId])).rows[0];if(!departure){await client.query('ROLLBACK');return res.status(409).json({error:{message:'La salida ya no está disponible.'}})}const snapshot={image:body.product_snapshot?.image,duration:product.duration_label,tag:product.tag,included:product.included||[],origin_iata:departure.origin_iata,confirmation_mode:departure.confirmation_mode,minimum_group_size:departure.minimum_group_size,sale_deadline:departure.sale_deadline};const {rows}=await client.query(`INSERT INTO rumbo_booking_requests(idempotency_key,catalog_product_id,catalog_departure_id,product_slug,product_name,provider,provider_reference,country,origin_iata,destination_iata,departure_date,return_date,adults,children,price_display,currency,contact_name,contact_email,contact_phone,contact_channel,referral_code,notes,product_snapshot,status,consent_accepted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,'Rumbo',$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,'payment_pending',now()) RETURNING reference`,[idempotency,productId,departureId,product.slug,product.name,product.provider_reference,product.country,departure.origin_iata||origin,product.destination_iata,departure.departure_date,departure.return_date,adults,children,`${departure.currency} ${Number(departure.price_amount).toFixed(2)}`,departure.currency,name,email,phone,clean(body.contact_channel)||'whatsapp',referral||null,clean(body.notes)||null,JSON.stringify(snapshot)]);if(departure.available_capacity!=null)await client.query(`UPDATE rumbo_catalog_departures SET available_capacity=available_capacity-$2 WHERE id=$1`,[departureId,travellers]);await client.query('COMMIT');return res.status(201).json(bookingJson(await bookingRow(pool,rows[0].reference)))}catch(error){await client.query('ROLLBACK').catch(()=>{});throw error}finally{client.release()}}catch(error){console.error(error);const message=String(error?.message||'');if(message.includes('RUMBO_INSUFFICIENT_CAPACITY'))return res.status(409).json({error:{message:'No quedan suficientes cupos para todos los viajeros.'}});if(message.includes('RUMBO_PASSENGER_LIMIT'))return res.status(422).json({error:{message:'La cantidad de pasajeros no está permitida para esta salida.'}});return res.status(500).json({error:{message:'No pudimos crear la reserva en Rumbo.'}})}});
+  app.post('/api/bookings',async(req,res)=>{
+    const body=rawJson(req);
+    if(!body)return res.status(400).json({error:{message:'Formulario inválido.'}});
+
+    const idempotency=clean(body.idempotency_key);
+    const productId=clean(body.catalog_product_id||body.rumbo_product_id);
+    const departureId=clean(body.catalog_departure_id||body.variant_id);
+    const email=clean(body.contact_email).toLowerCase();
+    const name=clean(body.contact_name);
+    const phone=clean(body.contact_phone);
+    const adults=Number(body.adults||1);
+    const children=Number(body.children||0);
+    const requestedUnits=adults+children;
+    const referral=clean(body.referral_code).toUpperCase();
+    const origin=clean(body.origin_iata).toUpperCase();
+    const passengers=Array.isArray(body.travellers)?body.travellers:[];
+    const policiesAccepted=body.policies_accepted===true;
+
+    if(!UUID.test(idempotency)||!UUID.test(productId)||!UUID.test(departureId)||!email||!name||!phone||
+       !Number.isInteger(adults)||!Number.isInteger(children)||adults<1||children<0||requestedUnits>18||
+       !policiesAccepted||passengers.length!==requestedUnits){
+      return res.status(422).json({error:{message:'Completa los viajeros y acepta las políticas antes de reservar.'}});
+    }
+
+    const normalizedPassengers=[];
+    let adultCount=0,childCount=0;
+    for(let index=0;index<passengers.length;index+=1){
+      const passenger=passengers[index]&&typeof passengers[index]==='object'?passengers[index]:{};
+      const passengerType=clean(passenger.passenger_type||passenger.type).toLowerCase();
+      const firstName=clean(passenger.first_name||passenger.firstName);
+      const lastName=clean(passenger.last_name||passenger.lastName);
+      const documentType=clean(passenger.document_type||passenger.documentType).toUpperCase();
+      const documentNumber=clean(passenger.document_number||passenger.documentNumber).toUpperCase();
+      const nationalityCode=clean(passenger.nationality_code||passenger.nationalityCode).toUpperCase();
+      const dateOfBirth=clean(passenger.date_of_birth||passenger.dateOfBirth);
+      if(!['adult','child'].includes(passengerType)||!firstName||!lastName||
+         (nationalityCode&&!/^[A-Z]{2}$/.test(nationalityCode))||
+         (dateOfBirth&&!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth))){
+        return res.status(422).json({error:{message:'Revisa los datos del viajero '+(index+1)+'.'}});
+      }
+      if(passengerType==='adult')adultCount+=1;else childCount+=1;
+      normalizedPassengers.push({
+        position:index+1,
+        passenger_type:passengerType,
+        first_name:firstName,
+        last_name:lastName,
+        document_type:documentType||null,
+        document_number:documentNumber||null,
+        nationality_code:nationalityCode||null,
+        date_of_birth:dateOfBirth||null,
+        lead_passenger:index===0
+      });
+    }
+    if(adultCount!==adults||childCount!==children){
+      return res.status(422).json({error:{message:'La composición de viajeros no coincide con adultos y niños seleccionados.'}});
+    }
+
+    try{
+      const existing=(await pool.query(
+        `SELECT reference FROM rumbo_booking_requests WHERE idempotency_key=$1::uuid LIMIT 1`,
+        [idempotency]
+      )).rows[0];
+      if(existing)return res.json(bookingJson(await bookingRow(pool,existing.reference)));
+
+      if(referral){
+        const valid=await pool.query(
+          `SELECT 1 FROM rumbo_partner_profiles p JOIN rumbo_accounts a ON a.id=p.account_id WHERE p.referral_code=$1 AND a.status='active'`,
+          [referral]
+        );
+        if(!valid.rowCount)return res.status(422).json({error:{message:'El enlace del Partner ya no es válido.'}});
+      }
+
+      const client=await pool.connect();
+      try{
+        await client.query('BEGIN');
+        const product=(await client.query(
+          `SELECT * FROM rumbo_catalog_products WHERE id=$1::uuid AND status='published' FOR SHARE`,
+          [productId]
+        )).rows[0];
+        if(!product){
+          await client.query('ROLLBACK');
+          return res.status(404).json({error:{message:'El producto ya no está disponible.'}});
+        }
+
+        const departure=(await client.query(
+          `SELECT * FROM rumbo_catalog_departures
+           WHERE id=$1::uuid AND product_id=$2::uuid AND status='active'
+             AND (sale_deadline IS NULL OR sale_deadline>=now())
+           FOR UPDATE`,
+          [departureId,productId]
+        )).rows[0];
+        if(!departure){
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:{message:'La salida ya no está disponible.'}});
+        }
+
+        const effectivePolicies={
+          cancellation:departure.policy_cancellation||product.policy_cancellation||null,
+          changes:departure.policy_changes||product.policy_changes||null,
+          refund:departure.policy_refund||product.policy_refund||null,
+          no_show:departure.policy_no_show||product.policy_no_show||null
+        };
+        const pricingSnapshot={
+          currency:departure.currency,
+          final_unit_price:Number(departure.price_amount),
+          taxes_per_person:departure.taxes_amount==null?null:Number(departure.taxes_amount),
+          suggested_price_per_person:departure.suggested_price_amount==null?null:Number(departure.suggested_price_amount),
+          travellers:requestedUnits,
+          total:Number(departure.price_amount)*requestedUnits
+        };
+        const productSnapshot={
+          image:body.product_snapshot?.image,
+          duration:product.duration_label,
+          tag:product.tag,
+          included:product.included||[],
+          origin_iata:departure.origin_iata,
+          confirmation_mode:departure.confirmation_mode,
+          minimum_group_size:departure.minimum_group_size,
+          sale_deadline:departure.sale_deadline,
+          sale_timezone:departure.sale_timezone,
+          provider_variant_reference:departure.provider_variant_reference,
+          product_type:product.product_type,
+          details:body.product_snapshot?.details||{},
+          policies:effectivePolicies
+        };
+
+        const {rows}=await client.query(
+          `INSERT INTO rumbo_booking_requests(
+             idempotency_key,catalog_product_id,catalog_departure_id,product_slug,product_name,provider,provider_reference,country,
+             origin_iata,destination_iata,departure_date,return_date,adults,children,price_display,currency,
+             contact_name,contact_email,contact_phone,contact_channel,referral_code,notes,product_snapshot,status,
+             consent_accepted_at,policies_accepted_at,pricing_snapshot,policy_snapshot,traveller_snapshot
+           ) VALUES(
+             $1::uuid,$2::uuid,$3::uuid,$4,$5,'Rumbo',$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14,$15,
+             $16,$17,$18,$19,$20,$21,$22::jsonb,'payment_pending',now(),now(),$23::jsonb,$24::jsonb,$25::jsonb
+           ) RETURNING id,reference`,
+          [
+            idempotency,productId,departureId,product.slug,product.name,product.provider_reference,product.country,
+            departure.origin_iata||origin,product.destination_iata,departure.departure_date,departure.return_date,adults,children,
+            `${departure.currency} ${Number(departure.price_amount).toFixed(2)}`,departure.currency,name,email,phone,
+            clean(body.contact_channel)||'whatsapp',referral||null,clean(body.notes)||null,JSON.stringify(productSnapshot),
+            JSON.stringify(pricingSnapshot),JSON.stringify(effectivePolicies),JSON.stringify(normalizedPassengers)
+          ]
+        );
+
+        for(const passenger of normalizedPassengers){
+          await client.query(
+            `INSERT INTO rumbo_booking_travellers(
+               booking_request_id,position,passenger_type,first_name,last_name,document_type,document_number,nationality_code,date_of_birth,lead_passenger
+             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::date,$10)`,
+            [
+              rows[0].id,passenger.position,passenger.passenger_type,passenger.first_name,passenger.last_name,
+              passenger.document_type,passenger.document_number,passenger.nationality_code,passenger.date_of_birth||'',passenger.lead_passenger
+            ]
+          );
+        }
+
+        if(departure.available_capacity!=null){
+          await client.query(
+            `UPDATE rumbo_catalog_departures SET available_capacity=available_capacity-$2 WHERE id=$1`,
+            [departureId,requestedUnits]
+          );
+        }
+
+        await client.query('COMMIT');
+        return res.status(201).json(bookingJson(await bookingRow(pool,rows[0].reference)));
+      }catch(error){
+        await client.query('ROLLBACK').catch(()=>{});
+        throw error;
+      }finally{
+        client.release();
+      }
+    }catch(error){
+      console.error(error);
+      const message=String(error?.message||'');
+      if(message.includes('RUMBO_INSUFFICIENT_CAPACITY'))return res.status(409).json({error:{message:'No quedan suficientes cupos para todos los viajeros.'}});
+      if(message.includes('RUMBO_PASSENGER_LIMIT'))return res.status(422).json({error:{message:'La cantidad de pasajeros no está permitida para esta salida.'}});
+      return res.status(500).json({error:{message:'No pudimos crear la reserva en Rumbo.'}});
+    }
+  });
 
   app.get('/api/bookings/:reference',async(req,res)=>{const reference=clean(req.params.reference).toUpperCase(),email=clean(req.query.email).toLowerCase();if(!REF.test(reference)||!email)return res.status(422).json({error:{message:'Referencia y correo son obligatorios.'}});await pool.query(`SELECT rumbo_expire_stale_native_bookings()`).catch(()=>{});const row=await bookingRow(pool,reference,email);if(!row)return res.status(404).json({error:{message:'No encontramos una reserva con esos datos.'}});return res.json(bookingJson(row))});
 
