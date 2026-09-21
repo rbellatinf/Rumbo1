@@ -7,7 +7,7 @@ services:
     region: oregon
     buildCommand: NPM_CONFIG_PRODUCTION=false npm ci --include=dev && npm run build
     startCommand: npm start
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production
@@ -35,7 +35,7 @@ services:
     buildCommand: cd backend/rumbo-api && npm install --omit=dev
     startCommand: cd backend/rumbo-api && npm run start:real
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     envVars:
       - key: DATABASE_URL
         fromDatabase:
