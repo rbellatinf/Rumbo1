@@ -48,9 +48,10 @@ app.get("/health", async (_req, res) => {
       status: innerOk ? "ok" : "degraded",
       service: "rumbo-native-front",
       runtime: "native",
+      commit: process.env.RENDER_GIT_COMMIT || null,
     });
   } catch {
-    res.status(503).json({ status: "error", service: "rumbo-native-front" });
+    res.status(503).json({ status: "error", service: "rumbo-native-front", commit: process.env.RENDER_GIT_COMMIT || null });
   }
 });
 
