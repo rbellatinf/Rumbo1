@@ -11,7 +11,6 @@ const { Pool } = pg;
 const PORT = Number(process.env.PORT || 4000);
 const INNER_PORT = Number(process.env.RUMBO_EDGE_PORT || 4005);
 const API_KEY = process.env.RUMBO_API_KEY || "";
-const DEMO_MODE = /^(1|true|yes)$/i.test(process.env.RUMBO_DEMO_MODE || "");
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
@@ -62,9 +61,6 @@ app.use("/api", (req, res, next) => {
 });
 
 async function adminSession(req) {
-  if (DEMO_MODE && req.get("X-Rumbo-Demo-Role") === "wholesaler_admin") {
-    return { account_id: null, email: "demo-admin@rumbo.local", role: "wholesaler_admin" };
-  }
   const header = req.get("Authorization") || "";
   if (!header.startsWith("Bearer ")) return null;
   const token = header.slice(7).trim();
