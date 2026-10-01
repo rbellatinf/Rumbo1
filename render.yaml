@@ -18,8 +18,6 @@ services:
           name: rumbo-api
           type: web
           envVarKey: RUMBO_API_KEY
-      - key: RUMBO_DEMO_MODE
-        value: "false"
       - key: CLOUDFLARE_ACCOUNT_ID
         value: b0c9535ffd40623838c8b025cc4bcda9
       - key: CLOUDFLARE_R2_BUCKET
@@ -47,10 +45,6 @@ services:
         generateValue: true
       - key: RUMBO_PAYMENT_CHECKOUT_SECRET
         generateValue: true
-      - key: RUMBO_DEMO_MODE
-        value: "false"
-      - key: RUMBO_LOAD_SAMPLE_CATALOG
-        value: "false"
       - key: RUMBO_ADMIN_EMAIL
         sync: false
       - key: RUMBO_ADMIN_PASSWORD
