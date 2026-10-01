@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node src/native-front.mjs",
-    "start:real": "npm run db:prepare && npm run db:verify && node src/native-front.mjs",
+    "start:real": "npm run db:prepare && npm run db:verify && npm run catalog:sync-images && node src/native-front.mjs",
     "db:prepare": "node scripts/prepare-db.mjs",
-    "db:verify": "node scripts/verify-db.mjs"
+    "db:verify": "node scripts/verify-db.mjs",
+    "catalog:sync-images": "node scripts/sync-real-catalog-images.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.876.0",
